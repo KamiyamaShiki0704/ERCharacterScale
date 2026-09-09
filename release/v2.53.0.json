@@ -1,0 +1,15 @@
+{
+  "version": "2.53.0",
+  "build_mode": "er-2.53-rigid-collider-velocity",
+  "artifact": "player_scale_no_bone.dll",
+  "bytes": 1014784,
+  "sha256": "F40FC6B9793A08E280C0CAD21289D1C164B31764AC7297477A71BA4C684AC00B",
+  "platform": "windows-x86_64",
+  "supported_game": "WW2.7.1.0 / game1.17.1",
+  "scope": "local player",
+  "accepted_scenario": "BD9004 at0.5 uniform scale; no sustained twitching observed",
+  "license": "MIT",
+  "dependency_repository": "https://github.com/KamiyamaShiki0704/fromsoftware-rs",
+  "dependency_revision": "02fa5681e27fd2ecd9da79d34aef9fae96805539",
+  "git_submodules": false
+}

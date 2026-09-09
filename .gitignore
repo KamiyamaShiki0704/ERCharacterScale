@@ -1,0 +1,26 @@
+/target/
+/dist/
+/private-fixtures/
+*.log
+*.jsonl
+*.pdb
+*.ilk
+*.exp
+*.lib
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+
+# Local development records and assistant configuration
+.codex/
+.claude/
+AGENTS.md
+CLAUDE.md
+/analysis/
+/PLANS.md
+/TASK_STATUS.md
+/ACCEPTANCE.md
