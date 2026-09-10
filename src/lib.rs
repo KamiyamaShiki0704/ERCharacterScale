@@ -12,6 +12,7 @@ mod cloth_local_scale;
 mod cloth_mesh_scale;
 mod cloth_owner_scope;
 mod cloth_render_scale;
+mod config;
 mod havok_probe;
 mod havok_shape_scale;
 mod hkx_collidable_probe;
@@ -21,6 +22,7 @@ mod model_matrix_scale;
 mod nr_probe;
 mod ragdoll_motion_scale;
 mod ragdoll_shape_scale;
+mod unit_runtime;
 
 use eldenring::{
     cs::{CSTaskGroupIndex, CSTaskImp, ChrIns, PlayerIns, WorldChrMan},
@@ -31,9 +33,11 @@ use fromsoftware_shared::{FromStatic, SharedTaskImpExt};
 const DLL_PROCESS_DETACH: u32 = 0;
 const DLL_PROCESS_ATTACH: u32 = 1;
 
-const BUILD_MODE: &str = "er-2.53-rigid-collider-velocity";
+const BUILD_MODE: &str = "er-2.54-configurable-units-rc1";
 const ENABLE_SYNC_DIAGNOSTIC: bool = true;
+#[cfg(test)]
 const SCALE_MIN: f32 = 0.50;
+#[cfg(test)]
 const SCALE_MAX: f32 = 3.0;
 const SCALE_COLLISION: bool = true;
 const SCALE_WEIGHT: bool = false;
@@ -61,12 +65,14 @@ const ENABLE_DETAILED_CLOTH_CHILD_LOGGING: bool = false;
 static STARTED: AtomicBool = AtomicBool::new(false);
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
+#[cfg(test)]
 #[derive(Clone, Copy)]
 struct ScaleEffect {
     sp_effect: i32,
     scale: f32,
 }
 
+#[cfg(test)]
 const SCALE_EFFECTS: &[ScaleEffect] = &[
     ScaleEffect {
         sp_effect: 21202000,
@@ -132,6 +138,8 @@ struct ScaleState {
     last_runtime_stage: &'static str,
     player_addr: Option<usize>,
     baseline: Option<PhysicsBaseline>,
+    visual_baseline: Option<[f32; 3]>,
+    last_selection: Option<config::Selection>,
     hknp_capsule_baseline: Option<havok_shape_scale::HknpCapsuleBaseline>,
     aabb_identity_matrix_state: model_matrix_scale::IdentityMatrixScaleState,
     ragdoll_motion_scale_state: ragdoll_motion_scale::RagdollMotionScaleState,
@@ -212,6 +220,8 @@ impl ScaleState {
         body_scale_port::clear_target();
         self.player_addr = None;
         self.baseline = None;
+        self.visual_baseline = None;
+        self.last_selection = None;
         self.hknp_capsule_baseline = None;
         self.aabb_identity_matrix_state = model_matrix_scale::IdentityMatrixScaleState::default();
         self.ragdoll_motion_scale_state = ragdoll_motion_scale::RagdollMotionScaleState::default();
@@ -331,6 +341,38 @@ fn run_task_thread(hmodule: usize) {
         return;
     }
 
+    let Some(config_path) =
+        log::log_path_from_module(hmodule).map(|path| path.with_file_name(config::FILE_NAME))
+    else {
+        log::line(format_args!(
+            "[ERCS-CONFIG] disabled: cannot resolve DLL directory"
+        ));
+        return;
+    };
+    let loaded = match config::load(&config_path) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            log::line(format_args!(
+                "[ERCS-CONFIG] disabled: {}: {error}",
+                config_path.display()
+            ));
+            return;
+        }
+    };
+    log::line(format_args!(
+        "[ERCS-CONFIG] {}; rules={} player={} enemies={}",
+        loaded.message,
+        loaded.config.rules.len(),
+        loaded.config.player.enabled,
+        loaded.config.enemies.enabled
+    ));
+    let config = loaded.config;
+    if !config.enabled || (!config.player.enabled && !config.enemies.enabled) {
+        log::line(format_args!(
+            "[ERCS-CONFIG] scaling disabled by configuration"
+        ));
+        return;
+    }
     let hook_started = Instant::now();
     let body_scale_hooks_ready = body_scale_port::install();
     let hook_install_micros = hook_started.elapsed().as_micros();
@@ -376,6 +418,7 @@ fn run_task_thread(hmodule: usize) {
     ));
 
     let mut state = ScaleState::default();
+    let mut units = unit_runtime::Runtime::new(config, body_scale_port::image_base());
     cs_task.run_recurring(
         move |_: &FD4TaskData| {
             state.task_frames = state.task_frames.wrapping_add(1);
@@ -386,27 +429,26 @@ fn run_task_thread(hmodule: usize) {
             }
             if SHUTDOWN.load(Ordering::Acquire) {
                 maybe_log_runtime_stage(&mut state, "shutdown");
+                units.clear();
                 state.reset();
                 return;
             }
 
             let Ok(world_chr_man) = (unsafe { WorldChrMan::instance_mut() }) else {
                 maybe_log_runtime_stage(&mut state, "world-chr-man-unavailable");
-                state.reset();
+                units.suspend();
                 return;
             };
 
-            let Some(player_ptr) = world_chr_man.main_player.as_mut() else {
-                maybe_log_runtime_stage(&mut state, "main-player-unavailable");
-                state.reset();
-                return;
-            };
-
-            maybe_log_runtime_stage(&mut state, "local-player-ready");
-            apply_player_scale(player_ptr.as_mut(), &mut state);
-            if ENABLE_SYNC_DIAGNOSTIC {
-                cloth_diagnostic::tick(state.task_frames);
-            }
+            let ready = units.tick(world_chr_man, state.task_frames);
+            maybe_log_runtime_stage(
+                &mut state,
+                if ready {
+                    "local-player-ready"
+                } else {
+                    "main-player-unavailable"
+                },
+            );
         },
         CSTaskGroupIndex::ChrIns_PrePhysics,
     );
@@ -441,9 +483,51 @@ fn run_nightreign_readonly_probe(exe_path: &str) {
     nr_probe::install_havok_runtime_root_probe();
 }
 
-fn apply_player_scale(player: &mut PlayerIns, state: &mut ScaleState) {
+fn apply_player_scale(player: &mut PlayerIns, state: &mut ScaleState, requested_scale: f32) -> f32 {
+    let applied_scale = apply_character_scale(&mut player.chr_ins, state, requested_scale);
+    if SCALE_HKNP_CAPSULE_SHAPE {
+        havok_shape_scale::scale_player_hknp_capsule_shape(
+            player,
+            &mut state.hknp_capsule_baseline,
+            applied_scale,
+        );
+    }
+
+    if SCALE_AABB_IDENTITY_MATRIX_BUFFER {
+        model_matrix_scale::scale_player_aabb_identity_matrices(
+            player,
+            &mut state.aabb_identity_matrix_state,
+            applied_scale,
+        );
+    }
+
+    if SCALE_RAGDOLL_BODY_CINFO_CAPSULES {
+        ragdoll_shape_scale::scale_player_ragdoll_body_cinfo_capsules(
+            player,
+            &mut state.ragdoll_body_cinfo_shape_state,
+            applied_scale,
+        );
+    }
+
+    if SCALE_RAGDOLL_LIVE_MOTION_COMS {
+        ragdoll_motion_scale::scale_player_ragdoll_motion_coms(
+            player,
+            &mut state.ragdoll_motion_scale_state,
+            applied_scale,
+        );
+    }
+
+    maybe_probe_havok(player, state, applied_scale);
+    maybe_probe_hkx_collidables(player, state, applied_scale);
+    maybe_probe_ragdoll_single(player, state, applied_scale);
+    maybe_probe_ragdoll_live(player, state, applied_scale);
+
+    applied_scale
+}
+
+fn apply_character_scale(chr: &mut ChrIns, state: &mut ScaleState, requested_scale: f32) -> f32 {
     let frame_started = Instant::now();
-    let player_addr = player as *mut PlayerIns as usize;
+    let player_addr = chr as *mut ChrIns as usize;
     if state.player_addr != Some(player_addr) {
         cloth_local_scale::restore_cloth_local_dimensions(&mut state.cloth_local_scale_state);
         cloth_instance_aabb_scale::clear_cloth_instance_aabb_state(
@@ -451,6 +535,7 @@ fn apply_player_scale(player: &mut PlayerIns, state: &mut ScaleState) {
         );
         state.player_addr = Some(player_addr);
         state.baseline = None;
+        state.visual_baseline = None;
         state.hknp_capsule_baseline = None;
         state.aabb_identity_matrix_state = model_matrix_scale::IdentityMatrixScaleState::default();
         state.ragdoll_motion_scale_state = ragdoll_motion_scale::RagdollMotionScaleState::default();
@@ -508,8 +593,7 @@ fn apply_player_scale(player: &mut PlayerIns, state: &mut ScaleState) {
         state.matrix_candidate_hits = [0; 16];
     }
 
-    let requested_scale = active_player_scale(&player.chr_ins);
-    let chr_ins_addr = &player.chr_ins as *const ChrIns as usize;
+    let chr_ins_addr = chr as *const ChrIns as usize;
     let bind_started = Instant::now();
     let bind_queries_before = memory_query::query_count();
     state.binding_audit_frames = state.binding_audit_frames.saturating_add(1);
@@ -699,48 +783,11 @@ fn apply_player_scale(player: &mut PlayerIns, state: &mut ScaleState) {
         maybe_log_body_scale_port_state(player_addr, requested_scale, binding, state)
     });
     let status_log_micros = status_log_started.elapsed().as_micros();
-    apply_visual_scale(player, applied_scale);
+    apply_visual_scale(chr, state, applied_scale);
 
     if SCALE_COLLISION {
-        apply_physics_scale(player, state, applied_scale);
+        apply_physics_scale(chr, state, applied_scale);
     }
-
-    if SCALE_HKNP_CAPSULE_SHAPE {
-        havok_shape_scale::scale_player_hknp_capsule_shape(
-            player,
-            &mut state.hknp_capsule_baseline,
-            applied_scale,
-        );
-    }
-
-    if SCALE_AABB_IDENTITY_MATRIX_BUFFER {
-        model_matrix_scale::scale_player_aabb_identity_matrices(
-            player,
-            &mut state.aabb_identity_matrix_state,
-            applied_scale,
-        );
-    }
-
-    if SCALE_RAGDOLL_BODY_CINFO_CAPSULES {
-        ragdoll_shape_scale::scale_player_ragdoll_body_cinfo_capsules(
-            player,
-            &mut state.ragdoll_body_cinfo_shape_state,
-            applied_scale,
-        );
-    }
-
-    if SCALE_RAGDOLL_LIVE_MOTION_COMS {
-        ragdoll_motion_scale::scale_player_ragdoll_motion_coms(
-            player,
-            &mut state.ragdoll_motion_scale_state,
-            applied_scale,
-        );
-    }
-
-    maybe_probe_havok(player, state, applied_scale);
-    maybe_probe_hkx_collidables(player, state, applied_scale);
-    maybe_probe_ragdoll_single(player, state, applied_scale);
-    maybe_probe_ragdoll_live(player, state, applied_scale);
 
     let total_micros = frame_started.elapsed().as_micros();
     let periodic_perf_summary = state.task_frames.is_multiple_of(600);
@@ -762,6 +809,7 @@ fn apply_player_scale(player: &mut PlayerIns, state: &mut ScaleState) {
             aabb_scale_result.fields_written,
         ));
     }
+    applied_scale
 }
 
 fn should_refresh_cloth_local_scale(
@@ -800,16 +848,7 @@ fn should_audit_body_scale_binding(cached_ready: bool, frames_since_audit: u32) 
     !cached_ready || frames_since_audit >= BODY_SCALE_BINDING_AUDIT_INTERVAL_FRAMES
 }
 
-fn active_player_scale(chr: &ChrIns) -> f32 {
-    let scale = first_matching_scale(|sp_effect| {
-        chr.special_effect
-            .entries()
-            .any(|entry| entry.param_id == sp_effect)
-    });
-
-    clamp_scale(scale)
-}
-
+#[cfg(test)]
 fn first_matching_scale(mut is_active: impl FnMut(i32) -> bool) -> f32 {
     SCALE_EFFECTS
         .iter()
@@ -1483,6 +1522,7 @@ fn maybe_log_matrix_candidates(target_anim_skeleton: usize, state: &mut ScaleSta
     }
 }
 
+#[cfg(test)]
 fn clamp_scale(scale: f32) -> f32 {
     if scale.is_finite() {
         scale.clamp(SCALE_MIN, SCALE_MAX)
@@ -1491,15 +1531,20 @@ fn clamp_scale(scale: f32) -> f32 {
     }
 }
 
-fn apply_visual_scale(player: &mut PlayerIns, scale: f32) {
-    let chr_ctrl = player.chr_ins.chr_ctrl.as_mut();
-    chr_ctrl.scale_size_x = scale;
-    chr_ctrl.scale_size_y = scale;
-    chr_ctrl.scale_size_z = scale;
+fn apply_visual_scale(chr: &mut ChrIns, state: &mut ScaleState, scale: f32) {
+    let chr_ctrl = chr.chr_ctrl.as_mut();
+    let baseline = *state.visual_baseline.get_or_insert([
+        chr_ctrl.scale_size_x,
+        chr_ctrl.scale_size_y,
+        chr_ctrl.scale_size_z,
+    ]);
+    chr_ctrl.scale_size_x = baseline[0] * scale;
+    chr_ctrl.scale_size_y = baseline[1] * scale;
+    chr_ctrl.scale_size_z = baseline[2] * scale;
 }
 
-fn apply_physics_scale(player: &mut PlayerIns, state: &mut ScaleState, scale: f32) {
-    let physics = player.chr_ins.modules.as_mut().physics.as_mut();
+fn apply_physics_scale(chr: &mut ChrIns, state: &mut ScaleState, scale: f32) {
+    let physics = chr.modules.as_mut().physics.as_mut();
     let baseline = *state
         .baseline
         .get_or_insert_with(|| PhysicsBaseline::capture(physics));

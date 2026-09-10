@@ -1,5 +1,42 @@
 # Validation
 
+## 2.54.0-rc.1 candidate
+
+The candidate adds configurable player/enemy rules and non-c0000 EnemyIns routes.
+It is not yet accepted in-game. Automatic checks completed on 2026-09-11:
+
+- 191 default tests pass in debug and release; 8 optional tests pass in each profile.
+- Clippy with warnings denied, rustfmt and the release DLL build pass.
+- Three owned non-c0000 character heaps run 600 iterations at independent factors
+  0.5, 1.5 and 3.0, retaining distinct native sizes, pose outputs and body collisions.
+- Direct non-c0000 cloth ownership reaches the existing 2.53 collider rotation
+  correction. Mock native calls verify corrected arguments, passthrough controls
+  and rejection after the character identity is recycled.
+- Shared cloth arrays preserve their original values when another instance loads
+  later. Conflicting factors restore the affected group; unrelated geometry keeps
+  its scale. Departing instances do not restore arrays still used by another unit.
+- Subject-owned effects, constant rules, filters, malformed files, type/owner
+  checks, dormant identities, model replacement and new handles are covered.
+- The owned original-PE check validates 11 additional enemy-relation/model code
+  witnesses and rejects a corruption in each. It never executes the mapped PE.
+- The accepted 2.53 DLL and its 419-file source manifest remain unchanged.
+
+Automatic evidence uses owned synthetic memory, existing local captured fixtures
+and read-only original executable inspection. Synthetic model numbers are fixture
+identities, not claims that those specific enemy types have passed in the game.
+The new runtime is per instance; old 2.53 visual acceptance does not carry over.
+
+Still required in-game: ordinary enemies, cloth users, nonhuman enemies and a Boss;
+0.5 / 1.5 / 3.0 / restore, movement and attacks, death/reload/teleport, and the
+BD9004 player regression with enemies enabled. Shared cloth with conflicting
+factors is an explicit unsupported case in this candidate. Special grabs,
+executions, attack volumes and Boss transitions are not automatically validated.
+
+For a first test, copy `examples/ERCharacterScale.enemies-half.toml` next to the
+DLL as `ERCharacterScale.toml`. It keeps the original player mappings and applies
+0.5 to supported enemies without requiring enemy SpEffects. Record actual model,
+NpcParam and event ID from `[ERCS-UNIT]` in the ordinary log when reporting results.
+
 ## Accepted runtime build
 
 - Build: `er-2.53-rigid-collider-velocity` / release2.53.0.
@@ -35,8 +72,7 @@ cargo test --locked real_271_pe_runtime_guard_and_negative_controls -- --ignored
 ```
 
 These7 tests and the1 original-executable check were also run successfully during
-publication using the existing private fixtures. Changing fixture loading affects
-only test builds; runtime scaling code is retained from the accepted2.53 version.
+2.53 publication and again for the 2.54 candidate using the existing private fixtures.
 The historical test-oracle Rust helpers under `src/test_support` are project code,
 not game binaries or captured assets.
 
@@ -45,5 +81,6 @@ not game binaries or captured assets.
 The GitHub release preserves the accepted binary rather than replacing it with a
 new local build. ItsSHA256 is
 `F40FC6B9793A08E280C0CAD21289D1C164B31764AC7297477A71BA4C684AC00B`.
-The public Cargo package metadata uses version2.53.0; the runtime build identifier
-and behavior remain2.53. Locally rebuilt files need not have the same binary hash.
+That release's Cargo metadata and runtime identify version2.53. The candidate uses
+version2.54.0-rc.1 and is a separate binary. Locally rebuilt files need not have the
+same binary hash.

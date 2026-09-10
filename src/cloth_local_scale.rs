@@ -5,6 +5,8 @@ use crate::{
     log,
 };
 
+pub(crate) mod shared;
+
 const ER_HCL_SIM_CLOTH_DATA_VTABLE_RVA: usize = 0x2D8B6F8;
 const ER_HCL_COLLIDABLE_VTABLE_RVA: usize = 0x2D8B758;
 const ER_HCL_CAPSULE_SHAPE_VTABLE_RVA: usize = 0x2D896D0;
@@ -72,7 +74,7 @@ struct FieldMemorySpan {
     used_end: usize,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct DimensionObjectBaseline {
     address: usize,
     roots: Vec<RootIdentity>,
@@ -302,6 +304,11 @@ impl DimensionObjectBaseline {
     }
 
     fn apply_budgeted(&mut self, scale: f32, maximum_fields: usize) -> Option<(usize, bool)> {
+        // A departing instance must not restore data still used at a non-neutral
+        // scale by another instance. The preflight resolves all consumers first.
+        if scale == 1.0 && shared::retained_by_scaled_consumer(self) {
+            return Some((0, true));
+        }
         if self.applied_scale_bits == scale.to_bits() && self.pending_scale_bits == 0 {
             self.pending_scale_bits = 0;
             self.next_field = 0;
@@ -511,7 +518,7 @@ fn scale_target_cloth_local_dimensions_inner(
             break;
         }
         captures_remaining -= 1;
-        match capture_simulation_baseline(sim_data) {
+        match shared::capture(sim_data, || capture_simulation_baseline(sim_data)) {
             Some(baseline) => {
                 state.simulations.push(baseline);
                 resolve_capture_rejection(&mut state.rejected_simulations, sim_data);
@@ -551,7 +558,7 @@ fn scale_target_cloth_local_dimensions_inner(
             break;
         }
         captures_remaining -= 1;
-        match capture_collidable_baseline(collidable) {
+        match shared::capture(collidable, || capture_collidable_baseline(collidable)) {
             Some(baseline) => {
                 state.collidables.push(baseline);
                 resolve_capture_rejection(&mut state.rejected_collidables, collidable);
@@ -582,7 +589,7 @@ fn scale_target_cloth_local_dimensions_inner(
             break;
         }
         captures_remaining -= 1;
-        match capture_shape_baseline(shape) {
+        match shared::capture(shape, || capture_shape_baseline(shape)) {
             Some(baseline) => {
                 state.shapes.push(baseline);
                 resolve_capture_rejection(&mut state.rejected_shapes, shape);

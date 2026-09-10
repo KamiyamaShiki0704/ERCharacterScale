@@ -1,3 +1,4 @@
+mod units;
 use std::{
     cell::{Cell, RefCell},
     mem::transmute,
@@ -5,6 +6,9 @@ use std::{
         RwLock,
         atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
     },
+};
+pub(crate) use units::{
+    detach_unit, refresh_unit_registry, register_unit, unregister_unit, with_collider_unit,
 };
 
 use ilhook::x64::{CallbackOption, HookFlags, Registers, hook_closure_jmp_back, hook_closure_retn};
@@ -70,24 +74,14 @@ const SKIN_SOURCE_SEAMS: &[(usize, &[u8])] = &[
         ],
     ),
 ];
-static CLOTH_SKIN_NORMAL_CALLS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SKIN_NORMAL_ROWS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SKIN_NORMAL_MAX_US: AtomicU64 = AtomicU64::new(0);
+
 const ER_CLOTH_MESH_P_VTABLE_RVA: usize = 0x2D83590;
 const CLOTH_MESH_FRAME_DISPATCH_PATTERN: &[u8] = &[
     0x8B, 0x41, 0x50, 0x48, 0x8B, 0xD9, 0x4D, 0x8B, 0xC1, 0x85, 0xC0, 0x74, 0x13, 0x83, 0xF8, 0x02,
     0x74, 0x07, 0xE8, 0x87, 0xF5, 0xFF, 0xFF, 0xEB, 0x0C, 0xE8, 0xE0, 0xFA, 0xFF, 0xFF, 0xEB, 0x05,
     0xE8, 0xE9, 0xF7, 0xFF, 0xFF,
 ];
-static CLOTH_MESH_FRAME_CALLS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_MESH_FRAMES_WRITTEN: AtomicU64 = AtomicU64::new(0);
-static CLOTH_MESH_FRAME_SEEN: AtomicU64 = AtomicU64::new(0);
-static CLOTH_MESH_FRAME_MAX_US: AtomicU64 = AtomicU64::new(0);
-static CLOTH_MESH_FRAME_MAX_QUERIES: AtomicU64 = AtomicU64::new(0);
-static CLOTH_MESH_NORMAL_ROWS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_MESH_PN_MAX_US: AtomicU64 = AtomicU64::new(0);
-static CLOTH_MESH_AREA_CALLS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_MESH_AREA_FRAMES: AtomicU64 = AtomicU64::new(0);
+
 // All three ER range paths converge here before advancing to the next matrix.
 // At this exact point RBX is the current bone index, RDI is its output, R14 is
 // the fallback provider and EAX still contains the provider's per-item result.
@@ -274,161 +268,10 @@ static HOOKS_READY: AtomicBool = AtomicBool::new(false);
 static MODULE_BASE: AtomicUsize = AtomicUsize::new(0);
 #[cfg(test)]
 pub(crate) static MODULE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-static TARGET_POSE_IMPORTER: AtomicUsize = AtomicUsize::new(0);
-static TARGET_CLOTH_POSE_IMPORTER: AtomicUsize = AtomicUsize::new(0);
-static TARGET_ANIM_SKELETON: AtomicUsize = AtomicUsize::new(0);
-static TARGET_CLOTH_SCOPE: RwLock<ClothOwnerScope> = RwLock::new(ClothOwnerScope {
-    player: 0,
-    player_model: 0,
-    assembly: 0,
-    anchor: 0,
-    routes: [ClothOwnerRoute {
-        slot_address: 0,
-        model: 0,
-        owner: 0,
-        input: 0,
-        inner: 0,
-        core: 0,
-    }; 27],
-});
-static TARGET_SCALE_BITS: AtomicU32 = AtomicU32::new(1.0f32.to_bits());
-static POSE_APPLIED_SCALE_BITS: AtomicU32 = AtomicU32::new(1.0f32.to_bits());
-static CLOTH_POSE_APPLIED_SCALE_BITS: AtomicU32 = AtomicU32::new(1.0f32.to_bits());
-static POSE_WRITE_LOCK: AtomicBool = AtomicBool::new(false);
 
-static POSE_TARGET_CALLS: AtomicU64 = AtomicU64::new(0);
-static POSE_TRANSFORMS_WRITTEN: AtomicU64 = AtomicU64::new(0);
-static CLOTH_POSE_TARGET_CALLS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_POSE_TRANSFORMS_WRITTEN: AtomicU64 = AtomicU64::new(0);
-static POSE_GATE_00: AtomicU64 = AtomicU64::new(0);
-static POSE_GATE_01: AtomicU64 = AtomicU64::new(0);
-static POSE_GATE_10: AtomicU64 = AtomicU64::new(0);
-static POSE_GATE_11: AtomicU64 = AtomicU64::new(0);
-static POSE_GATE_OTHER: AtomicU64 = AtomicU64::new(0);
-static AFFINE_SINGLE_TARGET_CALLS: AtomicU64 = AtomicU64::new(0);
-static AFFINE_SINGLE_MATRICES_WRITTEN: AtomicU64 = AtomicU64::new(0);
-static AFFINE_RANGE_TARGET_CALLS: AtomicU64 = AtomicU64::new(0);
-static AFFINE_RANGE_MATRICES_WRITTEN: AtomicU64 = AtomicU64::new(0);
-static AFFINE_RANGE_PROVIDER_SUCCESSES: AtomicU64 = AtomicU64::new(0);
-static AFFINE_RANGE_PROVIDER_IDENTITIES: AtomicU64 = AtomicU64::new(0);
-static AFFINE_RANGE_PROVIDER_FAILURES: AtomicU64 = AtomicU64::new(0);
-static SINGLE_TARGET_CALLS: AtomicU64 = AtomicU64::new(0);
-static SINGLE_MATRICES_WRITTEN: AtomicU64 = AtomicU64::new(0);
-static RANGE_TARGET_CALLS: AtomicU64 = AtomicU64::new(0);
-static RANGE_MATRICES_WRITTEN: AtomicU64 = AtomicU64::new(0);
-static REJECTED_OUTPUTS: AtomicU64 = AtomicU64::new(0);
-static RENDER_CALLS: AtomicU64 = AtomicU64::new(0);
-static RENDER_ROWS: AtomicU64 = AtomicU64::new(0);
-static RENDER_REJECTED: AtomicU64 = AtomicU64::new(0);
-static RENDER_MAX_US: AtomicU64 = AtomicU64::new(0);
-static RENDER_MAX_QUERIES: AtomicU64 = AtomicU64::new(0);
-
-static CLOTH_SETTER_CALLS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SLOT_INSERTS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SLOT_REPLACEMENTS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_TOPOLOGY_GENERATION: AtomicU64 = AtomicU64::new(0);
-static CLOTH_REPLACEMENT_CURSOR: AtomicUsize = AtomicUsize::new(0);
-static CLOTH_INSTANCE_OWNERS: [AtomicUsize; CLOTH_INSTANCE_SLOTS] =
-    [const { AtomicUsize::new(0) }; CLOTH_INSTANCE_SLOTS];
-static CLOTH_INSTANCE_INPUTS: [AtomicUsize; CLOTH_INSTANCE_SLOTS] =
-    [const { AtomicUsize::new(0) }; CLOTH_INSTANCE_SLOTS];
-static CLOTH_INSTANCE_WAS_EQUIPMENT: [AtomicBool; CLOTH_INSTANCE_SLOTS] =
-    [const { AtomicBool::new(false) }; CLOTH_INSTANCE_SLOTS];
-static CLOTH_INSTANCE_SOURCE_CALLS: [AtomicU64; CLOTH_INSTANCE_SLOTS] =
-    [const { AtomicU64::new(0) }; CLOTH_INSTANCE_SLOTS];
-static CLOTH_INSTANCE_COMMITS: [AtomicU64; CLOTH_INSTANCE_SLOTS] =
-    [const { AtomicU64::new(0) }; CLOTH_INSTANCE_SLOTS];
-static CLOTH_INSTANCE_SETTER_HITS: [AtomicU64; CLOTH_INSTANCE_SLOTS] =
-    [const { AtomicU64::new(0) }; CLOTH_INSTANCE_SLOTS];
-static CLOTH_INSTANCE_CORES: [AtomicUsize; CLOTH_INSTANCE_SLOTS] =
-    [const { AtomicUsize::new(0) }; CLOTH_INSTANCE_SLOTS];
-static CLOTH_INSTANCE_APPLIED_SCALE_BITS: [AtomicU32; CLOTH_INSTANCE_SLOTS] =
-    [const { AtomicU32::new(1.0f32.to_bits()) }; CLOTH_INSTANCE_SLOTS];
-static CLOTH_INSTANCE_PENDING_SCALE_BITS: [AtomicU32; CLOTH_INSTANCE_SLOTS] =
-    [const { AtomicU32::new(NO_PENDING_CLOTH_SCALE_BITS) }; CLOTH_INSTANCE_SLOTS];
-static CLOTH_PENDING_SLOT_MASK: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SCALE_TRANSITIONS_QUEUED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SCALE_TRANSITIONS_DEFERRED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SCALE_TRANSITIONS_REJECTED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SCALE_REFERENCE_COMMITS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SCALE_WRAPPER_DEFERRED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SCALE_WRAPPER_REJECTED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_REFERENCE_CALLS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_REFERENCE_ADJUSTED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_REFERENCE_PASSTHROUGH: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_REFERENCE_REJECTED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_PROBE_CALLS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_SOURCE_OWNER_E0_MATCHES: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_SOURCE_OWNER_E0_MISMATCHES: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_PRE_CORE_REQUESTED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_PRE_CORE_UNIT: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_PRE_CORE_OTHER: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_POST_CORE_REQUESTED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_POST_CORE_UNIT: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_POST_CORE_OTHER: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_POST_COPY_MATCHES: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_POST_COPY_MISMATCHES: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SOLVER_SOURCE_BRACKET_CALLS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SOLVER_SOURCE_BRACKET_TRANSFORMS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SOLVER_SOURCE_BRACKET_RESTORES: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SOLVER_SOURCE_BRACKET_REJECTED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SOLVER_SOURCE_DIRECT_TRANSFORMS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SOLVER_SOURCE_LAZY_CANDIDATES: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SOLVER_SOURCE_LAZY_RESOLVED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SOLVER_SOURCE_LAZY_REJECTED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SOLVER_SOURCE_LOCAL_SCALE_CALLS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SOLVER_SOURCE_LOCAL_SCALE_TRANSFORMS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SOLVER_SOURCE_LOCAL_SCALE_RESTORES: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SOLVER_SOURCE_LOCAL_SCALE_REJECTED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SOLVER_SOURCE_LOCAL_SCALE_PASSTHROUGH: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SOLVER_PRIVATE_CONTEXT_CALLS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SOLVER_PRIVATE_CONTEXT_RETURNS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_CORE_CHANGED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_DIRTY_MARKED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_SECONDARY_DIRTY_REJECTED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_IMMEDIATE_PROBE_TRANSITIONS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_IMMEDIATE_CHILDREN_OBSERVED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_IMMEDIATE_PARTICLE_MATCHES: AtomicU64 = AtomicU64::new(0);
-static CLOTH_IMMEDIATE_TRANSFORM_MATCHES: AtomicU64 = AtomicU64::new(0);
-static CLOTH_IMMEDIATE_BOTH_MATCHES: AtomicU64 = AtomicU64::new(0);
-static CLOTH_IMMEDIATE_UNREADABLE: AtomicU64 = AtomicU64::new(0);
-static CLOTH_TRANSFORM_RESYNC_CALLS: AtomicU64 = AtomicU64::new(0);
-static CLOTH_TRANSFORM_RESYNC_CHILDREN_OBSERVED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_TRANSFORM_RESYNC_CHILDREN_CHANGED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_TRANSFORM_RESYNC_ENTRIES_OBSERVED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_TRANSFORM_RESYNC_ENTRIES_CHANGED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_TRANSFORM_RESYNC_ENTRIES_ALREADY_SCALED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_TRANSFORM_RESYNC_ENTRIES_REJECTED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_TRANSFORM_RESYNC_TOPOLOGY_REJECTED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_ATTACHMENT_POSITION_BUFFERS_SHIFTED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_ATTACHMENT_PARTICLES_SHIFTED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_ATTACHMENT_AABBS_SHIFTED: AtomicU64 = AtomicU64::new(0);
-static CLOTH_ATTACHMENT_POSITION_REJECTED: AtomicU64 = AtomicU64::new(0);
-
-static MATRIX_CANDIDATE_KEYS: [AtomicU64; MATRIX_CANDIDATE_SLOTS] =
-    [const { AtomicU64::new(0) }; MATRIX_CANDIDATE_SLOTS];
-static MATRIX_CANDIDATE_HITS: [AtomicU64; MATRIX_CANDIDATE_SLOTS] =
-    [const { AtomicU64::new(0) }; MATRIX_CANDIDATE_SLOTS];
-static MATRIX_CANDIDATE_KINDS: [AtomicU32; MATRIX_CANDIDATE_SLOTS] =
-    [const { AtomicU32::new(0) }; MATRIX_CANDIDATE_SLOTS];
-static MATRIX_CANDIDATE_CALLER_RVAS: [AtomicUsize; MATRIX_CANDIDATE_SLOTS] =
-    [const { AtomicUsize::new(0) }; MATRIX_CANDIDATE_SLOTS];
-static MATRIX_CANDIDATE_FIRST_THIS: [AtomicUsize; MATRIX_CANDIDATE_SLOTS] =
-    [const { AtomicUsize::new(0) }; MATRIX_CANDIDATE_SLOTS];
-static MATRIX_CANDIDATE_LAST_THIS: [AtomicUsize; MATRIX_CANDIDATE_SLOTS] =
-    [const { AtomicUsize::new(0) }; MATRIX_CANDIDATE_SLOTS];
-static MATRIX_CANDIDATE_OUTPUTS: [AtomicUsize; MATRIX_CANDIDATE_SLOTS] =
-    [const { AtomicUsize::new(0) }; MATRIX_CANDIDATE_SLOTS];
-static MATRIX_CANDIDATE_ARG8: [AtomicU32; MATRIX_CANDIDATE_SLOTS] =
-    [const { AtomicU32::new(0) }; MATRIX_CANDIDATE_SLOTS];
-static MATRIX_CANDIDATE_ARG9: [AtomicU32; MATRIX_CANDIDATE_SLOTS] =
-    [const { AtomicU32::new(0) }; MATRIX_CANDIDATE_SLOTS];
-static MATRIX_CANDIDATE_QWORD_48: [AtomicUsize; MATRIX_CANDIDATE_SLOTS] =
-    [const { AtomicUsize::new(0) }; MATRIX_CANDIDATE_SLOTS];
-static MATRIX_CANDIDATE_QWORD_68: [AtomicUsize; MATRIX_CANDIDATE_SLOTS] =
-    [const { AtomicUsize::new(0) }; MATRIX_CANDIDATE_SLOTS];
-static MATRIX_CANDIDATE_QWORD_88: [AtomicUsize; MATRIX_CANDIDATE_SLOTS] =
-    [const { AtomicUsize::new(0) }; MATRIX_CANDIDATE_SLOTS];
+#[cfg(test)]
+#[path = "test_support/character_units.rs"]
+pub(crate) mod test_characters;
 
 type SolverSourceTransform = [f32; 12];
 
@@ -1019,7 +862,7 @@ pub fn install() -> bool {
     let pose_hook = unsafe {
         hook_closure_retn(
             base + ER_POSE_IMPORTER_UPDATE_RVA,
-            pose_importer_update_hook,
+            units::pose,
             CallbackOption::None,
             HookFlags::empty(),
         )
@@ -1035,7 +878,7 @@ pub fn install() -> bool {
     let cloth_setter_hook = unsafe {
         hook_closure_retn(
             base + ER_CLOTH_INPUT_SETTER_RVA,
-            cloth_input_setter_hook,
+            units::setter,
             CallbackOption::None,
             HookFlags::empty(),
         )
@@ -1051,7 +894,7 @@ pub fn install() -> bool {
     let cloth_secondary_reference_hook = unsafe {
         hook_closure_retn(
             base + ER_CLOTH_SECONDARY_REFERENCE_SUBMIT_RVA,
-            cloth_secondary_reference_submit_hook,
+            units::secondary,
             CallbackOption::None,
             HookFlags::empty(),
         )
@@ -1067,7 +910,7 @@ pub fn install() -> bool {
     let cloth_commit_hook = unsafe {
         hook_closure_retn(
             base + ER_CLOTH_INNER_COMMIT_RVA,
-            cloth_inner_commit_hook,
+            units::commit,
             CallbackOption::None,
             HookFlags::empty(),
         )
@@ -1083,7 +926,7 @@ pub fn install() -> bool {
     let render_hook = unsafe {
         hook_closure_retn(
             base + ER_ANIM_SKELETON_GET_AFFINE_RANGE_RVA,
-            cloth_render_range_hook,
+            units::render,
             CallbackOption::None,
             HookFlags::empty(),
         )
@@ -1099,7 +942,7 @@ pub fn install() -> bool {
     let mesh_frame_hook = unsafe {
         hook_closure_jmp_back(
             base + ER_CLOTH_MESH_FRAME_COMMIT_RVA,
-            cloth_mesh_frame_hook,
+            units::mesh_frame,
             CallbackOption::None,
             HookFlags::empty(),
         )
@@ -1114,7 +957,7 @@ pub fn install() -> bool {
     let mesh_pn_hook = unsafe {
         hook_closure_retn(
             base + ER_CLOTH_MESH_PN_FLOAT_RVA,
-            cloth_mesh_pn_hook,
+            units::mesh_pn,
             CallbackOption::None,
             HookFlags::empty(),
         )
@@ -1129,7 +972,7 @@ pub fn install() -> bool {
     let mesh_pn_aligned_hook = unsafe {
         hook_closure_retn(
             base + ER_CLOTH_MESH_PN_ALIGNED_RVA,
-            cloth_mesh_pn_hook,
+            units::mesh_pn,
             CallbackOption::None,
             HookFlags::empty(),
         )
@@ -1145,7 +988,7 @@ pub fn install() -> bool {
     let skin_normal_hook = unsafe {
         hook_closure_retn(
             base + ER_CLOTH_SKIN_PN_RVA,
-            cloth_skin_normal_hook,
+            units::skin,
             CallbackOption::None,
             HookFlags::empty(),
         )
@@ -1162,7 +1005,7 @@ pub fn install() -> bool {
         let affine_single_hook = unsafe {
             hook_closure_retn(
                 base + ER_ANIM_SKELETON_GET_AFFINE_RVA,
-                anim_skeleton_get_affine_hook,
+                units::affine,
                 CallbackOption::None,
                 HookFlags::empty(),
             )
@@ -1178,7 +1021,7 @@ pub fn install() -> bool {
         let affine_range_item_hook = unsafe {
             hook_closure_jmp_back(
                 base + ER_ANIM_SKELETON_GET_AFFINE_RANGE_ITEM_COMMIT_RVA,
-                anim_skeleton_get_affine_range_item_commit_hook,
+                units::affine_item,
                 CallbackOption::None,
                 HookFlags::empty(),
             )
@@ -1196,7 +1039,7 @@ pub fn install() -> bool {
         let single_hook = unsafe {
             hook_closure_retn(
                 base + ER_ANIM_SKELETON_GET_RVA,
-                anim_skeleton_get_hook,
+                units::matrix,
                 CallbackOption::None,
                 HookFlags::empty(),
             )
@@ -1212,7 +1055,7 @@ pub fn install() -> bool {
         let range_hook = unsafe {
             hook_closure_retn(
                 base + ER_ANIM_SKELETON_GET_RANGE_RVA,
-                anim_skeleton_get_range_hook,
+                units::range,
                 CallbackOption::None,
                 HookFlags::empty(),
             )
@@ -1254,7 +1097,43 @@ pub fn bind_local_player(chr_ins_addr: usize, scale: f32) -> TargetBinding {
     crate::memory_query::scoped(|| bind_local_player_inner(chr_ins_addr, scale))
 }
 
+pub(crate) fn image_base() -> usize {
+    MODULE_BASE.load(Ordering::Acquire)
+}
+
+/// Pre-physics, only after the runtime has revalidated the full unit identity.
+pub(crate) fn restore_unit_pose() {
+    let state = current_unit_state();
+    if state.pose_write_lock.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let primary = state.target_pose_importer.load(Ordering::Acquire);
+    let cloth = state.target_cloth_pose_importer.load(Ordering::Acquire);
+    for (importer, applied) in [
+        (primary, &state.pose_applied_scale_bits),
+        (cloth, &state.cloth_pose_applied_scale_bits),
+    ] {
+        if importer == 0
+            || (importer == primary && std::ptr::eq(applied, &state.cloth_pose_applied_scale_bits))
+            || !pose_importer_uses_update_hook(importer, image_base())
+        {
+            continue;
+        }
+        let inner = importer + POSE_INNER_OFFSET;
+        let materialized = read_u8(inner + POSE_MATERIALIZED_OFFSET);
+        let previous = f32::from_bits(applied.load(Ordering::Acquire));
+        if let PoseScaleAction::Scale(ratio) =
+            plan_pose_scale(previous, 1.0, materialized, materialized)
+            && scale_pose_output(inner, ratio).is_some()
+        {
+            applied.store(1.0f32.to_bits(), Ordering::Release);
+        }
+    }
+    state.pose_write_lock.store(false, Ordering::Release);
+}
+
 fn bind_local_player_inner(chr_ins_addr: usize, scale: f32) -> TargetBinding {
+    let unit_state = current_unit_state();
     if !HOOKS_READY.load(Ordering::Acquire) {
         clear_target();
         return TargetBinding {
@@ -1295,6 +1174,27 @@ fn bind_local_player_inner(chr_ins_addr: usize, scale: f32) -> TargetBinding {
         read_usize(chr_ins_addr + CHR_INS_ANIM_SKELETON_MODIFIER_OFFSET).unwrap_or(0);
     let base = MODULE_BASE.load(Ordering::Acquire);
 
+    if read_usize(chr_ins_addr) == Some(base + crate::cloth_owner_scope::ENEMY_VTABLE_RVA) {
+        let scope = ClothOwnerScope::capture(chr_ins_addr, cloth_pose_importer, base, read_usize);
+        let model = read_usize(chr_ins_addr + 0x50).unwrap_or(0);
+        let owner = model.checked_add(0x130).and_then(read_usize);
+        if scope.player != chr_ins_addr
+            || owner.is_none()
+            || owner.is_some_and(|owner| {
+                owner != 0 && !scope.routes.iter().any(|route| route.owner == owner)
+            })
+        {
+            clear_target();
+            return TargetBinding {
+                ready: false,
+                pose_importer,
+                cloth_pose_importer,
+                cloth_pose_source,
+                anim_skeleton_modifier,
+                reason: "enemy-model-cloth-ownership-unsupported",
+            };
+        }
+    }
     if !pose_importer_uses_update_hook(pose_importer, base) {
         clear_target();
         return TargetBinding {
@@ -1329,24 +1229,39 @@ fn bind_local_player_inner(chr_ins_addr: usize, scale: f32) -> TargetBinding {
         };
     }
 
-    let primary_changed = TARGET_POSE_IMPORTER.load(Ordering::Acquire) != pose_importer;
-    let cloth_changed = TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire) != cloth_pose_importer;
+    let primary_changed = unit_state.target_pose_importer.load(Ordering::Acquire) != pose_importer;
+    let cloth_changed = unit_state
+        .target_cloth_pose_importer
+        .load(Ordering::Acquire)
+        != cloth_pose_importer;
     let anim_skeleton_changed =
-        TARGET_ANIM_SKELETON.load(Ordering::Acquire) != anim_skeleton_modifier;
+        unit_state.target_anim_skeleton.load(Ordering::Acquire) != anim_skeleton_modifier;
     if primary_changed || cloth_changed || anim_skeleton_changed {
         publish_neutral();
         if primary_changed {
-            POSE_APPLIED_SCALE_BITS.store(1.0f32.to_bits(), Ordering::Release);
+            unit_state
+                .pose_applied_scale_bits
+                .store(1.0f32.to_bits(), Ordering::Release);
         }
         if cloth_changed {
-            CLOTH_POSE_APPLIED_SCALE_BITS.store(1.0f32.to_bits(), Ordering::Release);
+            unit_state
+                .cloth_pose_applied_scale_bits
+                .store(1.0f32.to_bits(), Ordering::Release);
             reset_all_cloth_scale_states();
         }
-        TARGET_POSE_IMPORTER.store(pose_importer, Ordering::Release);
-        TARGET_CLOTH_POSE_IMPORTER.store(cloth_pose_importer, Ordering::Release);
-        TARGET_ANIM_SKELETON.store(anim_skeleton_modifier, Ordering::Release);
+        unit_state
+            .target_pose_importer
+            .store(pose_importer, Ordering::Release);
+        unit_state
+            .target_cloth_pose_importer
+            .store(cloth_pose_importer, Ordering::Release);
+        unit_state
+            .target_anim_skeleton
+            .store(anim_skeleton_modifier, Ordering::Release);
     }
-    TARGET_SCALE_BITS.store(scale.to_bits(), Ordering::Release);
+    unit_state
+        .target_scale_bits
+        .store(scale.to_bits(), Ordering::Release);
 
     TargetBinding {
         ready: true,
@@ -1359,14 +1274,20 @@ fn bind_local_player_inner(chr_ins_addr: usize, scale: f32) -> TargetBinding {
 }
 
 pub fn publish_target_scale(scale: f32) -> bool {
+    let unit_state = current_unit_state();
     if !HOOKS_READY.load(Ordering::Acquire)
-        || TARGET_POSE_IMPORTER.load(Ordering::Acquire) == 0
-        || TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire) == 0
+        || unit_state.target_pose_importer.load(Ordering::Acquire) == 0
+        || unit_state
+            .target_cloth_pose_importer
+            .load(Ordering::Acquire)
+            == 0
         || !valid_scale(scale)
     {
         return false;
     }
-    TARGET_SCALE_BITS.store(scale.to_bits(), Ordering::Release);
+    unit_state
+        .target_scale_bits
+        .store(scale.to_bits(), Ordering::Release);
     true
 }
 
@@ -1376,57 +1297,75 @@ pub fn clear_target() {
 }
 
 pub fn counters() -> HookCounters {
+    let unit_state = current_unit_state();
     HookCounters {
-        render_calls: RENDER_CALLS.load(Ordering::Relaxed),
-        render_rows: RENDER_ROWS.load(Ordering::Relaxed),
-        render_rejected: RENDER_REJECTED.load(Ordering::Relaxed),
-        render_max_us: RENDER_MAX_US.load(Ordering::Relaxed),
-        render_max_queries: RENDER_MAX_QUERIES.load(Ordering::Relaxed),
-        pose_target_calls: POSE_TARGET_CALLS.load(Ordering::Relaxed),
-        pose_transforms_written: POSE_TRANSFORMS_WRITTEN.load(Ordering::Relaxed),
-        cloth_pose_target_calls: CLOTH_POSE_TARGET_CALLS.load(Ordering::Relaxed),
-        cloth_pose_transforms_written: CLOTH_POSE_TRANSFORMS_WRITTEN.load(Ordering::Relaxed),
-        pose_gate_00: POSE_GATE_00.load(Ordering::Relaxed),
-        pose_gate_01: POSE_GATE_01.load(Ordering::Relaxed),
-        pose_gate_10: POSE_GATE_10.load(Ordering::Relaxed),
-        pose_gate_11: POSE_GATE_11.load(Ordering::Relaxed),
-        pose_gate_other: POSE_GATE_OTHER.load(Ordering::Relaxed),
-        pose_applied_scale_bits: POSE_APPLIED_SCALE_BITS.load(Ordering::Acquire),
-        cloth_pose_applied_scale_bits: CLOTH_POSE_APPLIED_SCALE_BITS.load(Ordering::Acquire),
-        affine_single_target_calls: AFFINE_SINGLE_TARGET_CALLS.load(Ordering::Relaxed),
-        affine_single_matrices_written: AFFINE_SINGLE_MATRICES_WRITTEN.load(Ordering::Relaxed),
-        affine_range_target_calls: AFFINE_RANGE_TARGET_CALLS.load(Ordering::Relaxed),
-        affine_range_matrices_written: AFFINE_RANGE_MATRICES_WRITTEN.load(Ordering::Relaxed),
-        affine_range_provider_successes: AFFINE_RANGE_PROVIDER_SUCCESSES.load(Ordering::Relaxed),
-        affine_range_provider_identities: AFFINE_RANGE_PROVIDER_IDENTITIES.load(Ordering::Relaxed),
-        affine_range_provider_failures: AFFINE_RANGE_PROVIDER_FAILURES.load(Ordering::Relaxed),
-        single_target_calls: SINGLE_TARGET_CALLS.load(Ordering::Relaxed),
-        single_matrices_written: SINGLE_MATRICES_WRITTEN.load(Ordering::Relaxed),
-        range_target_calls: RANGE_TARGET_CALLS.load(Ordering::Relaxed),
-        range_matrices_written: RANGE_MATRICES_WRITTEN.load(Ordering::Relaxed),
-        rejected_outputs: REJECTED_OUTPUTS.load(Ordering::Relaxed),
+        render_calls: unit_state.render_calls.load(Ordering::Relaxed),
+        render_rows: unit_state.render_rows.load(Ordering::Relaxed),
+        render_rejected: unit_state.render_rejected.load(Ordering::Relaxed),
+        render_max_us: unit_state.render_max_us.load(Ordering::Relaxed),
+        render_max_queries: unit_state.render_max_queries.load(Ordering::Relaxed),
+        pose_target_calls: unit_state.pose_target_calls.load(Ordering::Relaxed),
+        pose_transforms_written: unit_state.pose_transforms_written.load(Ordering::Relaxed),
+        cloth_pose_target_calls: unit_state.cloth_pose_target_calls.load(Ordering::Relaxed),
+        cloth_pose_transforms_written: unit_state
+            .cloth_pose_transforms_written
+            .load(Ordering::Relaxed),
+        pose_gate_00: unit_state.pose_gate_00.load(Ordering::Relaxed),
+        pose_gate_01: unit_state.pose_gate_01.load(Ordering::Relaxed),
+        pose_gate_10: unit_state.pose_gate_10.load(Ordering::Relaxed),
+        pose_gate_11: unit_state.pose_gate_11.load(Ordering::Relaxed),
+        pose_gate_other: unit_state.pose_gate_other.load(Ordering::Relaxed),
+        pose_applied_scale_bits: unit_state.pose_applied_scale_bits.load(Ordering::Acquire),
+        cloth_pose_applied_scale_bits: unit_state
+            .cloth_pose_applied_scale_bits
+            .load(Ordering::Acquire),
+        affine_single_target_calls: unit_state
+            .affine_single_target_calls
+            .load(Ordering::Relaxed),
+        affine_single_matrices_written: unit_state
+            .affine_single_matrices_written
+            .load(Ordering::Relaxed),
+        affine_range_target_calls: unit_state.affine_range_target_calls.load(Ordering::Relaxed),
+        affine_range_matrices_written: unit_state
+            .affine_range_matrices_written
+            .load(Ordering::Relaxed),
+        affine_range_provider_successes: unit_state
+            .affine_range_provider_successes
+            .load(Ordering::Relaxed),
+        affine_range_provider_identities: unit_state
+            .affine_range_provider_identities
+            .load(Ordering::Relaxed),
+        affine_range_provider_failures: unit_state
+            .affine_range_provider_failures
+            .load(Ordering::Relaxed),
+        single_target_calls: unit_state.single_target_calls.load(Ordering::Relaxed),
+        single_matrices_written: unit_state.single_matrices_written.load(Ordering::Relaxed),
+        range_target_calls: unit_state.range_target_calls.load(Ordering::Relaxed),
+        range_matrices_written: unit_state.range_matrices_written.load(Ordering::Relaxed),
+        rejected_outputs: unit_state.rejected_outputs.load(Ordering::Relaxed),
     }
 }
 
 pub fn matrix_candidates() -> [MatrixCandidate; MATRIX_CANDIDATE_SLOTS] {
+    let unit_state = current_unit_state();
     let mut candidates = [MatrixCandidate::default(); MATRIX_CANDIDATE_SLOTS];
     for (slot, candidate) in candidates.iter_mut().enumerate() {
-        let hits = MATRIX_CANDIDATE_HITS[slot].load(Ordering::Acquire);
+        let hits = unit_state.matrix_candidate_hits[slot].load(Ordering::Acquire);
         if hits == 0 {
             continue;
         }
         *candidate = MatrixCandidate {
             slot,
-            kind: MATRIX_CANDIDATE_KINDS[slot].load(Ordering::Relaxed),
-            caller_rva: MATRIX_CANDIDATE_CALLER_RVAS[slot].load(Ordering::Relaxed),
-            first_this: MATRIX_CANDIDATE_FIRST_THIS[slot].load(Ordering::Relaxed),
-            last_this: MATRIX_CANDIDATE_LAST_THIS[slot].load(Ordering::Relaxed),
-            output: MATRIX_CANDIDATE_OUTPUTS[slot].load(Ordering::Relaxed),
-            arg8: MATRIX_CANDIDATE_ARG8[slot].load(Ordering::Relaxed),
-            arg9: MATRIX_CANDIDATE_ARG9[slot].load(Ordering::Relaxed),
-            qword_48: MATRIX_CANDIDATE_QWORD_48[slot].load(Ordering::Relaxed),
-            qword_68: MATRIX_CANDIDATE_QWORD_68[slot].load(Ordering::Relaxed),
-            qword_88: MATRIX_CANDIDATE_QWORD_88[slot].load(Ordering::Relaxed),
+            kind: unit_state.matrix_candidate_kinds[slot].load(Ordering::Relaxed),
+            caller_rva: unit_state.matrix_candidate_caller_rvas[slot].load(Ordering::Relaxed),
+            first_this: unit_state.matrix_candidate_first_this[slot].load(Ordering::Relaxed),
+            last_this: unit_state.matrix_candidate_last_this[slot].load(Ordering::Relaxed),
+            output: unit_state.matrix_candidate_outputs[slot].load(Ordering::Relaxed),
+            arg8: unit_state.matrix_candidate_arg8[slot].load(Ordering::Relaxed),
+            arg9: unit_state.matrix_candidate_arg9[slot].load(Ordering::Relaxed),
+            qword_48: unit_state.matrix_candidate_qword_48[slot].load(Ordering::Relaxed),
+            qword_68: unit_state.matrix_candidate_qword_68[slot].load(Ordering::Relaxed),
+            qword_88: unit_state.matrix_candidate_qword_88[slot].load(Ordering::Relaxed),
             hits,
         };
     }
@@ -1442,27 +1381,41 @@ pub fn matrix_candidate_kind_name(kind: u32) -> &'static str {
 }
 
 fn publish_neutral() {
-    TARGET_SCALE_BITS.store(1.0f32.to_bits(), Ordering::Release);
+    let unit_state = current_unit_state();
+    unit_state
+        .target_scale_bits
+        .store(1.0f32.to_bits(), Ordering::Release);
 }
 
 fn clear_object_targets() {
-    if let Ok(mut scope) = TARGET_CLOTH_SCOPE.try_write() {
+    let unit_state = current_unit_state();
+    if let Ok(mut scope) = unit_state.target_cloth_scope.try_write() {
         *scope = ClothOwnerScope::default();
     }
-    TARGET_POSE_IMPORTER.store(0, Ordering::Release);
-    TARGET_CLOTH_POSE_IMPORTER.store(0, Ordering::Release);
-    TARGET_ANIM_SKELETON.store(0, Ordering::Release);
-    POSE_APPLIED_SCALE_BITS.store(1.0f32.to_bits(), Ordering::Release);
-    CLOTH_POSE_APPLIED_SCALE_BITS.store(1.0f32.to_bits(), Ordering::Release);
+    unit_state.target_pose_importer.store(0, Ordering::Release);
+    unit_state
+        .target_cloth_pose_importer
+        .store(0, Ordering::Release);
+    unit_state.target_anim_skeleton.store(0, Ordering::Release);
+    unit_state
+        .pose_applied_scale_bits
+        .store(1.0f32.to_bits(), Ordering::Release);
+    unit_state
+        .cloth_pose_applied_scale_bits
+        .store(1.0f32.to_bits(), Ordering::Release);
     reset_all_cloth_scale_states();
 }
 
 fn reset_all_cloth_scale_states() {
-    CLOTH_PENDING_SLOT_MASK.store(0, Ordering::Release);
+    let unit_state = current_unit_state();
+    unit_state
+        .cloth_pending_slot_mask
+        .store(0, Ordering::Release);
     for slot in 0..CLOTH_INSTANCE_SLOTS {
-        CLOTH_INSTANCE_CORES[slot].store(0, Ordering::Release);
-        CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].store(1.0f32.to_bits(), Ordering::Release);
-        CLOTH_INSTANCE_PENDING_SCALE_BITS[slot]
+        unit_state.cloth_instance_cores[slot].store(0, Ordering::Release);
+        unit_state.cloth_instance_applied_scale_bits[slot]
+            .store(1.0f32.to_bits(), Ordering::Release);
+        unit_state.cloth_instance_pending_scale_bits[slot]
             .store(NO_PENDING_CLOTH_SCALE_BITS, Ordering::Release);
     }
 }
@@ -1696,6 +1649,18 @@ fn real_271_pe_runtime_guard_and_negative_controls() {
         block += length;
     }
     assert_eq!(validate_runtime(base), Ok(()));
+    assert!(crate::unit_runtime::EnemyApi::validate(base).is_some());
+    for at in [
+        0x3F1C90, 0x3F1CB2, 0x3F1CDF, 0x51B5D0, 0x51B5E9, 0x51B580, 0x51B590, 0x51B5A0, 0x51B5B0,
+        0x9F1C60, 0x9F1448,
+    ] {
+        image[at] ^= 1;
+        assert!(
+            crate::unit_runtime::EnemyApi::validate(base).is_none(),
+            "enemy native witness {at:X}"
+        );
+        image[at] ^= 1;
+    }
     for at in [
         nt + 8,
         ER_POSE_IMPORTER_UPDATE_RVA,
@@ -1760,6 +1725,7 @@ fn cloth_input_setter_hook(registers: *mut Registers, original: usize) -> usize 
 }
 
 fn cloth_secondary_reference_submit_hook(registers: *mut Registers, original: usize) -> usize {
+    let unit_state = current_unit_state();
     let registers = unsafe { &*registers };
     let inner = registers.rcx as usize;
     let source_address = registers.rdx as usize;
@@ -1768,22 +1734,30 @@ fn cloth_secondary_reference_submit_hook(registers: *mut Registers, original: us
     let Some((slot, owner)) = target_cloth_slot_and_owner_for_inner(inner) else {
         return unsafe { original(inner, source_address) };
     };
-    CLOTH_SECONDARY_REFERENCE_CALLS.fetch_add(1, Ordering::Relaxed);
+    unit_state
+        .cloth_secondary_reference_calls
+        .fetch_add(1, Ordering::Relaxed);
 
     // The native +0x4B dirty branch runs on the callback after a transition
     // commit. The global SpEffect request can already have changed again, so
     // the secondary reference must use this exact instance's committed scale.
-    let requested_bits = CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].load(Ordering::Acquire);
+    let requested_bits = unit_state.cloth_instance_applied_scale_bits[slot].load(Ordering::Acquire);
     let Some(requested_scale) = committed_cloth_scale(requested_bits) else {
-        CLOTH_SECONDARY_REFERENCE_REJECTED.fetch_add(1, Ordering::Relaxed);
+        unit_state
+            .cloth_secondary_reference_rejected
+            .fetch_add(1, Ordering::Relaxed);
         return unsafe { original(inner, source_address) };
     };
     let Some(source) = read_matrix(source_address) else {
-        CLOTH_SECONDARY_REFERENCE_REJECTED.fetch_add(1, Ordering::Relaxed);
+        unit_state
+            .cloth_secondary_reference_rejected
+            .fetch_add(1, Ordering::Relaxed);
         return unsafe { original(inner, source_address) };
     };
     let Some(root) = read_matrix(owner.saturating_add(CLOTH_MAIN_TRANSFORM_OFFSET)) else {
-        CLOTH_SECONDARY_REFERENCE_REJECTED.fetch_add(1, Ordering::Relaxed);
+        unit_state
+            .cloth_secondary_reference_rejected
+            .fetch_add(1, Ordering::Relaxed);
         return unsafe { original(inner, source_address) };
     };
     let Some(planned) = secondary_reference_matrix_for_scale(
@@ -1791,16 +1765,21 @@ fn cloth_secondary_reference_submit_hook(registers: *mut Registers, original: us
         requested_scale,
         [root[12], root[13], root[14]],
     ) else {
-        CLOTH_SECONDARY_REFERENCE_REJECTED.fetch_add(1, Ordering::Relaxed);
+        unit_state
+            .cloth_secondary_reference_rejected
+            .fetch_add(1, Ordering::Relaxed);
         return unsafe { original(inner, source_address) };
     };
 
     let passthrough = planned == source;
     if !passthrough
-        && (CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].load(Ordering::Acquire) != requested_bits
+        && (unit_state.cloth_instance_applied_scale_bits[slot].load(Ordering::Acquire)
+            != requested_bits
             || target_cloth_slot_and_owner_for_inner(inner) != Some((slot, owner)))
     {
-        CLOTH_SECONDARY_REFERENCE_REJECTED.fetch_add(1, Ordering::Relaxed);
+        unit_state
+            .cloth_secondary_reference_rejected
+            .fetch_add(1, Ordering::Relaxed);
         return unsafe { original(inner, source_address) };
     }
 
@@ -1809,10 +1788,14 @@ fn cloth_secondary_reference_submit_hook(registers: *mut Registers, original: us
     // duration of the synchronous call.
     let adjusted = AlignedClothMatrix(planned);
     let effective_source_address = if passthrough {
-        CLOTH_SECONDARY_REFERENCE_PASSTHROUGH.fetch_add(1, Ordering::Relaxed);
+        unit_state
+            .cloth_secondary_reference_passthrough
+            .fetch_add(1, Ordering::Relaxed);
         source_address
     } else {
-        CLOTH_SECONDARY_REFERENCE_ADJUSTED.fetch_add(1, Ordering::Relaxed);
+        unit_state
+            .cloth_secondary_reference_adjusted
+            .fetch_add(1, Ordering::Relaxed);
         adjusted.0.as_ptr() as usize
     };
 
@@ -1822,19 +1805,25 @@ fn cloth_secondary_reference_submit_hook(registers: *mut Registers, original: us
     let probe_active = (requested_scale - 1.0).abs() > 0.01;
     let core_before = read_usize(inner.saturating_add(0x30)).unwrap_or(0);
     if probe_active {
-        CLOTH_SECONDARY_PROBE_CALLS.fetch_add(1, Ordering::Relaxed);
+        unit_state
+            .cloth_secondary_probe_calls
+            .fetch_add(1, Ordering::Relaxed);
         if source_address == owner.saturating_add(CLOTH_SECONDARY_TRANSFORM_OFFSET) {
-            CLOTH_SECONDARY_SOURCE_OWNER_E0_MATCHES.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .cloth_secondary_source_owner_e0_matches
+                .fetch_add(1, Ordering::Relaxed);
         } else {
-            CLOTH_SECONDARY_SOURCE_OWNER_E0_MISMATCHES.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .cloth_secondary_source_owner_e0_mismatches
+                .fetch_add(1, Ordering::Relaxed);
         }
         let core_before_matrix =
             read_matrix(core_before.saturating_add(CLOTH_CORE_SECONDARY_TRANSFORM_OFFSET));
         record_cloth_matrix_scale_class(
             classify_cloth_matrix_scale(core_before_matrix.as_ref(), requested_scale),
-            &CLOTH_SECONDARY_PRE_CORE_REQUESTED,
-            &CLOTH_SECONDARY_PRE_CORE_UNIT,
-            &CLOTH_SECONDARY_PRE_CORE_OTHER,
+            &unit_state.cloth_secondary_pre_core_requested,
+            &unit_state.cloth_secondary_pre_core_unit,
+            &unit_state.cloth_secondary_pre_core_other,
         );
     }
 
@@ -1843,20 +1832,26 @@ fn cloth_secondary_reference_submit_hook(registers: *mut Registers, original: us
     if probe_active {
         let core_after = read_usize(inner.saturating_add(0x30)).unwrap_or(0);
         if core_after != core_before {
-            CLOTH_SECONDARY_CORE_CHANGED.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .cloth_secondary_core_changed
+                .fetch_add(1, Ordering::Relaxed);
         }
         let core_after_matrix =
             read_matrix(core_after.saturating_add(CLOTH_CORE_SECONDARY_TRANSFORM_OFFSET));
         record_cloth_matrix_scale_class(
             classify_cloth_matrix_scale(core_after_matrix.as_ref(), requested_scale),
-            &CLOTH_SECONDARY_POST_CORE_REQUESTED,
-            &CLOTH_SECONDARY_POST_CORE_UNIT,
-            &CLOTH_SECONDARY_POST_CORE_OTHER,
+            &unit_state.cloth_secondary_post_core_requested,
+            &unit_state.cloth_secondary_post_core_unit,
+            &unit_state.cloth_secondary_post_core_other,
         );
         if core_after_matrix == Some(planned) {
-            CLOTH_SECONDARY_POST_COPY_MATCHES.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .cloth_secondary_post_copy_matches
+                .fetch_add(1, Ordering::Relaxed);
         } else {
-            CLOTH_SECONDARY_POST_COPY_MISMATCHES.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .cloth_secondary_post_copy_mismatches
+                .fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -1864,8 +1859,11 @@ fn cloth_secondary_reference_submit_hook(registers: *mut Registers, original: us
 }
 
 fn target_cloth_slot_and_owner_for_inner(inner: usize) -> Option<(usize, usize)> {
+    let unit_state = current_unit_state();
     let base = MODULE_BASE.load(Ordering::Acquire);
-    let target_input = TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire);
+    let target_input = unit_state
+        .target_cloth_pose_importer
+        .load(Ordering::Acquire);
     if base == 0 || inner == 0 || target_input == 0 {
         return None;
     }
@@ -1878,10 +1876,10 @@ fn target_cloth_slot_and_owner_for_inner(inner: usize) -> Option<(usize, usize)>
     }
 
     for slot in 0..CLOTH_INSTANCE_SLOTS {
-        let owner = CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire);
+        let owner = unit_state.cloth_instance_owners[slot].load(Ordering::Acquire);
         if owner != 0
-            && (CLOTH_INSTANCE_INPUTS[slot].load(Ordering::Acquire) == target_input
-                || CLOTH_INSTANCE_WAS_EQUIPMENT[slot].load(Ordering::Acquire))
+            && (unit_state.cloth_instance_inputs[slot].load(Ordering::Acquire) == target_input
+                || unit_state.cloth_instance_was_equipment[slot].load(Ordering::Acquire))
             && read_usize(owner.saturating_add(0x40)) == Some(inner)
             && target_cloth_input(slot, target_input).is_some()
             && object_has_vtable(owner, expected_outer_vtable)
@@ -1894,16 +1892,20 @@ fn target_cloth_slot_and_owner_for_inner(inner: usize) -> Option<(usize, usize)>
 
 // Shared selection seam for source, transition, collision and diagnostic paths.
 fn target_cloth_input(slot: usize, target_input: usize) -> Option<usize> {
-    let owner = CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire);
-    let input = CLOTH_INSTANCE_INPUTS[slot].load(Ordering::Acquire);
+    let unit_state = current_unit_state();
+    let owner = unit_state.cloth_instance_owners[slot].load(Ordering::Acquire);
+    let input = unit_state.cloth_instance_inputs[slot].load(Ordering::Acquire);
     if owner == 0
         || input == 0
         || target_input == 0
-        || TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire) != target_input
+        || unit_state
+            .target_cloth_pose_importer
+            .load(Ordering::Acquire)
+            != target_input
     {
         return None;
     }
-    let scope = TARGET_CLOTH_SCOPE.try_read().ok()?;
+    let scope = unit_state.target_cloth_scope.try_read().ok()?;
     if let Some(route) = scope.find(owner, input) {
         // A cached address/vtable alone does not prove current ownership.
         // Recheck the direct slot, back-reference, input and core at use time.
@@ -1913,7 +1915,7 @@ fn target_cloth_input(slot: usize, target_input: usize) -> Option<usize> {
     }
     // Preserve the pre-existing exact-selected-input path (including owners
     // not in an equipment slot). Independent inputs require a proven route.
-    (!CLOTH_INSTANCE_WAS_EQUIPMENT[slot].load(Ordering::Acquire)
+    (!unit_state.cloth_instance_was_equipment[slot].load(Ordering::Acquire)
         && input == target_input
         && read_usize(owner.saturating_add(0x120)) == Some(input))
     .then_some(input)
@@ -1926,7 +1928,13 @@ pub fn refresh_owned_cloth_inputs(player: usize, anchor: usize) {
 }
 
 fn refresh_owned_cloth_inputs_inner(player: usize, anchor: usize) {
-    if anchor == 0 || TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire) != anchor {
+    let unit_state = current_unit_state();
+    if anchor == 0
+        || unit_state
+            .target_cloth_pose_importer
+            .load(Ordering::Acquire)
+            != anchor
+    {
         return;
     }
     let next = ClothOwnerScope::capture(
@@ -1935,7 +1943,7 @@ fn refresh_owned_cloth_inputs_inner(player: usize, anchor: usize) {
         MODULE_BASE.load(Ordering::Acquire),
         read_usize,
     );
-    let Ok(mut current) = TARGET_CLOTH_SCOPE.try_write() else {
+    let Ok(mut current) = unit_state.target_cloth_scope.try_write() else {
         return;
     };
     let changed = *current != next;
@@ -1946,28 +1954,30 @@ fn refresh_owned_cloth_inputs_inner(player: usize, anchor: usize) {
         // Do not leave revoked pending slots preventing AABB work forever.
         for route in previous.routes.iter().filter(|r| r.owner != 0) {
             if next.find(route.owner, route.input).is_none() {
-                for (slot, owner) in CLOTH_INSTANCE_OWNERS.iter().enumerate() {
+                for (slot, owner) in unit_state.cloth_instance_owners.iter().enumerate() {
                     if owner.load(Ordering::Acquire) == route.owner {
                         cancel_pending_cloth_transition(slot);
                     }
                 }
             }
         }
-        CLOTH_TOPOLOGY_GENERATION.fetch_add(1, Ordering::Release);
+        unit_state
+            .cloth_topology_generation
+            .fetch_add(1, Ordering::Release);
     }
     // Discovery must not depend on the setter having run after hook install,
     // nor on the global diagnostic ring retaining an equipment owner forever.
     for route in next.routes.iter().filter(|r| r.owner != 0) {
         let recorded = (0..CLOTH_INSTANCE_SLOTS).any(|slot| {
-            CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire) == route.owner
-                && CLOTH_INSTANCE_INPUTS[slot].load(Ordering::Acquire) == route.input
+            unit_state.cloth_instance_owners[slot].load(Ordering::Acquire) == route.owner
+                && unit_state.cloth_instance_inputs[slot].load(Ordering::Acquire) == route.input
         });
         if !recorded {
             observe_cloth_instance_binding(route.owner, route.input, false);
         }
         for slot in 0..CLOTH_INSTANCE_SLOTS {
-            if CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire) == route.owner {
-                CLOTH_INSTANCE_WAS_EQUIPMENT[slot].store(true, Ordering::Release);
+            if unit_state.cloth_instance_owners[slot].load(Ordering::Acquire) == route.owner {
+                unit_state.cloth_instance_was_equipment[slot].store(true, Ordering::Release);
             }
         }
     }
@@ -1978,8 +1988,9 @@ fn target_solver_source_slot(
     current_transform: usize,
     update_context: usize,
 ) -> Option<usize> {
+    let unit_state = current_unit_state();
     let (slot, owner) = target_cloth_slot_and_owner_for_inner(inner)?;
-    let input = CLOTH_INSTANCE_INPUTS[slot].load(Ordering::Acquire);
+    let input = unit_state.cloth_instance_inputs[slot].load(Ordering::Acquire);
     (current_transform == owner.saturating_add(CLOTH_MAIN_TRANSFORM_OFFSET)
         && input != 0
         && read_usize(owner.saturating_add(0x120)) == Some(input)
@@ -2253,6 +2264,7 @@ fn restore_solver_source_local_scales(
 }
 
 fn cloth_inner_commit_hook(registers: *mut Registers, original: usize) -> usize {
+    let unit_state = current_unit_state();
     let registers = unsafe { &*registers };
     let inner = registers.rcx as usize;
     let event = registers.rdx as usize;
@@ -2264,26 +2276,29 @@ fn cloth_inner_commit_hook(registers: *mut Registers, original: usize) -> usize 
 
     let mut committed_transition = None;
     let mut force_main = original_force_main;
-    let mut pending_mask = CLOTH_PENDING_SLOT_MASK.load(Ordering::Acquire);
+    let mut pending_mask = unit_state.cloth_pending_slot_mask.load(Ordering::Acquire);
     if pending_mask != 0 {
         let base = MODULE_BASE.load(Ordering::Acquire);
         let expected_outer_vtable = base.saturating_add(ER_CLOTH_MODEL_VTABLE_RVA);
         let expected_inner_vtable = base.saturating_add(ER_CLOTH_INNER_VTABLE_RVA);
-        let target_input = TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire);
+        let target_input = unit_state
+            .target_cloth_pose_importer
+            .load(Ordering::Acquire);
 
         while pending_mask != 0 {
             let slot = pending_mask.trailing_zeros() as usize;
             pending_mask &= pending_mask - 1;
-            let pending_bits = CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].load(Ordering::Acquire);
+            let pending_bits =
+                unit_state.cloth_instance_pending_scale_bits[slot].load(Ordering::Acquire);
             if pending_bits == NO_PENDING_CLOTH_SCALE_BITS
                 || pending_bits == IN_PROGRESS_CLOTH_SCALE_BITS
             {
                 continue;
             }
 
-            let owner = CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire);
-            let captured_input = CLOTH_INSTANCE_INPUTS[slot].load(Ordering::Acquire);
-            let core = CLOTH_INSTANCE_CORES[slot].load(Ordering::Acquire);
+            let owner = unit_state.cloth_instance_owners[slot].load(Ordering::Acquire);
+            let captured_input = unit_state.cloth_instance_inputs[slot].load(Ordering::Acquire);
+            let core = unit_state.cloth_instance_cores[slot].load(Ordering::Acquire);
             if owner == 0
                 || captured_input == 0
                 || target_cloth_input(slot, target_input) != Some(captured_input)
@@ -2300,15 +2315,20 @@ fn cloth_inner_commit_hook(registers: *mut Registers, original: usize) -> usize 
                 || !matches!(read_u8(inner.saturating_add(0x60)), Some(value) if value != 0)
                 || core == 0
             {
-                CLOTH_SCALE_WRAPPER_REJECTED.fetch_add(1, Ordering::Relaxed);
+                unit_state
+                    .cloth_scale_wrapper_rejected
+                    .fetch_add(1, Ordering::Relaxed);
                 continue;
             }
 
             let requested_scale = f32::from_bits(pending_bits);
-            let previous_scale =
-                f32::from_bits(CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].load(Ordering::Acquire));
+            let previous_scale = f32::from_bits(
+                unit_state.cloth_instance_applied_scale_bits[slot].load(Ordering::Acquire),
+            );
             let Some(current_matrix) = read_matrix(current_transform) else {
-                CLOTH_SCALE_WRAPPER_DEFERRED.fetch_add(1, Ordering::Relaxed);
+                unit_state
+                    .cloth_scale_wrapper_deferred
+                    .fetch_add(1, Ordering::Relaxed);
                 continue;
             };
             let Some(reference_matrix) = reference_matrix_for_scale_transition(
@@ -2316,16 +2336,20 @@ fn cloth_inner_commit_hook(registers: *mut Registers, original: usize) -> usize 
                 previous_scale,
                 requested_scale,
             ) else {
-                CLOTH_SCALE_WRAPPER_DEFERRED.fetch_add(1, Ordering::Relaxed);
+                unit_state
+                    .cloth_scale_wrapper_deferred
+                    .fetch_add(1, Ordering::Relaxed);
                 continue;
             };
             let reference_address = core.saturating_add(CLOTH_CORE_REFERENCE_TRANSFORM_OFFSET);
             if !is_memory_accessible(reference_address, size_of::<[f32; 16]>(), true) {
-                CLOTH_SCALE_WRAPPER_REJECTED.fetch_add(1, Ordering::Relaxed);
+                unit_state
+                    .cloth_scale_wrapper_rejected
+                    .fetch_add(1, Ordering::Relaxed);
                 continue;
             }
 
-            if CLOTH_INSTANCE_PENDING_SCALE_BITS[slot]
+            if unit_state.cloth_instance_pending_scale_bits[slot]
                 .compare_exchange(
                     pending_bits,
                     IN_PROGRESS_CLOTH_SCALE_BITS,
@@ -2337,16 +2361,22 @@ fn cloth_inner_commit_hook(registers: *mut Registers, original: usize) -> usize 
                 continue;
             }
 
-            if CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire) != owner
-                || CLOTH_INSTANCE_INPUTS[slot].load(Ordering::Acquire) != captured_input
-                || TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire) != target_input
+            if unit_state.cloth_instance_owners[slot].load(Ordering::Acquire) != owner
+                || unit_state.cloth_instance_inputs[slot].load(Ordering::Acquire) != captured_input
+                || unit_state
+                    .target_cloth_pose_importer
+                    .load(Ordering::Acquire)
+                    != target_input
                 || target_cloth_input(slot, target_input) != Some(captured_input)
                 || read_usize(owner.saturating_add(0x40)) != Some(inner)
                 || read_usize(owner.saturating_add(0x120)) != Some(captured_input)
                 || read_usize(inner.saturating_add(0x30)) != Some(core)
             {
-                CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(pending_bits, Ordering::Release);
-                CLOTH_SCALE_WRAPPER_REJECTED.fetch_add(1, Ordering::Relaxed);
+                unit_state.cloth_instance_pending_scale_bits[slot]
+                    .store(pending_bits, Ordering::Release);
+                unit_state
+                    .cloth_scale_wrapper_rejected
+                    .fetch_add(1, Ordering::Relaxed);
                 continue;
             }
 
@@ -2388,7 +2418,9 @@ fn cloth_inner_commit_hook(registers: *mut Registers, original: usize) -> usize 
     // pose. Role-aware 2.30 captures also show a duplicate scale on 71 active
     // inputs: native core90 already contributes the requested scale. Preserve
     // all source Qs scale values, without selecting/normalizing by magnitude.
-    let target_input = TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire);
+    let target_input = unit_state
+        .target_cloth_pose_importer
+        .load(Ordering::Acquire);
     let requested_scale = current_scale();
     let target_slot = target_solver_source_slot(inner, current_transform, update_context);
     let solver_source_eligible = ENABLE_EXTRA_CLOTH_SOLVER_SOURCE_TRANSLATION
@@ -2407,7 +2439,9 @@ fn cloth_inner_commit_hook(registers: *mut Registers, original: usize) -> usize 
             )
             .and_then(|(transforms, count)| {
                 let lazy_count = solver_scratch.lazy_indices.len();
-                CLOTH_SOLVER_SOURCE_LAZY_CANDIDATES.fetch_add(lazy_count as u64, Ordering::Relaxed);
+                unit_state
+                    .cloth_solver_source_lazy_candidates
+                    .fetch_add(lazy_count as u64, Ordering::Relaxed);
                 let resolved = materialize_live_lazy_solver_sources(
                     consumer_context,
                     transforms,
@@ -2416,7 +2450,9 @@ fn cloth_inner_commit_hook(registers: *mut Registers, original: usize) -> usize 
                     &solver_scratch.lazy_indices,
                 );
                 let Some(resolved) = resolved else {
-                    CLOTH_SOLVER_SOURCE_LAZY_REJECTED.fetch_add(1, Ordering::Relaxed);
+                    unit_state
+                        .cloth_solver_source_lazy_rejected
+                        .fetch_add(1, Ordering::Relaxed);
                     return None;
                 };
                 let direct = solver_scratch.indices.len().saturating_sub(lazy_count);
@@ -2430,16 +2466,25 @@ fn cloth_inner_commit_hook(registers: *mut Registers, original: usize) -> usize 
                     &mut solver_scratch.backups,
                 )
                 .map(|writes| {
-                    CLOTH_SOLVER_SOURCE_LOCAL_SCALE_PASSTHROUGH.fetch_add(1, Ordering::Relaxed);
+                    unit_state
+                        .cloth_solver_source_local_scale_passthrough
+                        .fetch_add(1, Ordering::Relaxed);
                     if let Some(slot) = target_slot {
-                        CLOTH_INSTANCE_SOURCE_CALLS[slot].fetch_add(1, Ordering::Relaxed);
+                        unit_state.cloth_instance_source_calls[slot]
+                            .fetch_add(1, Ordering::Relaxed);
                     }
-                    CLOTH_SOLVER_SOURCE_BRACKET_CALLS.fetch_add(1, Ordering::Relaxed);
-                    CLOTH_SOLVER_SOURCE_BRACKET_TRANSFORMS
+                    unit_state
+                        .cloth_solver_source_bracket_calls
+                        .fetch_add(1, Ordering::Relaxed);
+                    unit_state
+                        .cloth_solver_source_bracket_transforms
                         .fetch_add(writes as u64, Ordering::Relaxed);
-                    CLOTH_SOLVER_SOURCE_DIRECT_TRANSFORMS
+                    unit_state
+                        .cloth_solver_source_direct_transforms
                         .fetch_add(direct as u64, Ordering::Relaxed);
-                    CLOTH_SOLVER_SOURCE_LAZY_RESOLVED.fetch_add(resolved as u64, Ordering::Relaxed);
+                    unit_state
+                        .cloth_solver_source_lazy_resolved
+                        .fetch_add(resolved as u64, Ordering::Relaxed);
                     (consumer_context, transforms, count, writes)
                 })
             })
@@ -2448,25 +2493,33 @@ fn cloth_inner_commit_hook(registers: *mut Registers, original: usize) -> usize 
         None
     };
     if solver_source_eligible && solver_source_span.is_none() {
-        CLOTH_SOLVER_SOURCE_BRACKET_REJECTED.fetch_add(1, Ordering::Relaxed);
+        unit_state
+            .cloth_solver_source_bracket_rejected
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     // A failed private preparation discards only scratch. The native fallback
     // receives the untouched canonical context; never retry live mutations.
     let native_context = solver_source_span.map_or(update_context, |span| span.0);
     if solver_source_span.is_some() {
-        CLOTH_SOLVER_PRIVATE_CONTEXT_CALLS.fetch_add(1, Ordering::Relaxed);
+        unit_state
+            .cloth_solver_private_context_calls
+            .fetch_add(1, Ordering::Relaxed);
     }
     let result = unsafe { original(inner, event, current_transform, native_context, force_main) };
 
     if let Some((_, transforms, count, writes)) = solver_source_span {
-        CLOTH_SOLVER_PRIVATE_CONTEXT_RETURNS.fetch_add(1, Ordering::Relaxed);
+        unit_state
+            .cloth_solver_private_context_returns
+            .fetch_add(1, Ordering::Relaxed);
         let source = unsafe {
             std::slice::from_raw_parts_mut(transforms as *mut SolverSourceTransform, count)
         };
         // Historical restore counters now describe only private scratch.
         restore_solver_source_transforms(source, &solver_scratch.backups);
-        CLOTH_SOLVER_SOURCE_BRACKET_RESTORES.fetch_add(writes as u64, Ordering::Relaxed);
+        unit_state
+            .cloth_solver_source_bracket_restores
+            .fetch_add(writes as u64, Ordering::Relaxed);
     }
     SOLVER_SOURCE_SCRATCH.with(|scratch| {
         *scratch.borrow_mut() = solver_scratch;
@@ -2487,52 +2540,70 @@ fn cloth_inner_commit_hook(registers: *mut Registers, original: usize) -> usize 
                 record_cloth_position_sync_counts(counts);
             }
         } else {
-            CLOTH_IMMEDIATE_PROBE_TRANSITIONS.fetch_add(1, Ordering::Relaxed);
-            CLOTH_IMMEDIATE_UNREADABLE.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .cloth_immediate_probe_transitions
+                .fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .cloth_immediate_unreadable
+                .fetch_add(1, Ordering::Relaxed);
         }
     }
 
     if let Some((slot, requested_bits, _, _, core, _, owner)) = committed_transition {
         // Native code may replace a core/owner while handling the transition.
         // Never publish the old operation's applied state into a reused slot.
-        if CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire) != owner
-            || CLOTH_INSTANCE_CORES[slot].load(Ordering::Acquire) != core
+        if unit_state.cloth_instance_owners[slot].load(Ordering::Acquire) != owner
+            || unit_state.cloth_instance_cores[slot].load(Ordering::Acquire) != core
             || target_cloth_input(slot, target_input).is_none()
         {
-            CLOTH_SCALE_WRAPPER_REJECTED.fetch_add(1, Ordering::Relaxed);
-            if CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire) == owner
-                && CLOTH_INSTANCE_CORES[slot].load(Ordering::Acquire) == core
+            unit_state
+                .cloth_scale_wrapper_rejected
+                .fetch_add(1, Ordering::Relaxed);
+            if unit_state.cloth_instance_owners[slot].load(Ordering::Acquire) == owner
+                && unit_state.cloth_instance_cores[slot].load(Ordering::Acquire) == core
             {
-                CLOTH_INSTANCE_PENDING_SCALE_BITS[slot]
+                unit_state.cloth_instance_pending_scale_bits[slot]
                     .store(NO_PENDING_CLOTH_SCALE_BITS, Ordering::Release);
-                CLOTH_PENDING_SLOT_MASK.fetch_and(!(1u64 << slot), Ordering::AcqRel);
+                unit_state
+                    .cloth_pending_slot_mask
+                    .fetch_and(!(1u64 << slot), Ordering::AcqRel);
             }
             return result;
         }
-        CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].store(requested_bits, Ordering::Release);
-        CLOTH_INSTANCE_PENDING_SCALE_BITS[slot]
+        unit_state.cloth_instance_applied_scale_bits[slot].store(requested_bits, Ordering::Release);
+        unit_state.cloth_instance_pending_scale_bits[slot]
             .store(NO_PENDING_CLOTH_SCALE_BITS, Ordering::Release);
-        CLOTH_PENDING_SLOT_MASK.fetch_and(!(1u64 << slot), Ordering::AcqRel);
-        CLOTH_SCALE_REFERENCE_COMMITS.fetch_add(1, Ordering::Relaxed);
-        CLOTH_INSTANCE_COMMITS[slot].fetch_add(1, Ordering::Relaxed);
+        unit_state
+            .cloth_pending_slot_mask
+            .fetch_and(!(1u64 << slot), Ordering::AcqRel);
+        unit_state
+            .cloth_scale_reference_commits
+            .fetch_add(1, Ordering::Relaxed);
+        unit_state.cloth_instance_commits[slot].fetch_add(1, Ordering::Relaxed);
         // Applied scale changes which native child generation and collision
         // caches are authoritative even when the owner/core pointers stay the
         // same. Publish that event so task-side local/AABB work runs once on
         // the newly committed generation instead of polling inactive wrappers.
-        CLOTH_TOPOLOGY_GENERATION.fetch_add(1, Ordering::Release);
+        unit_state
+            .cloth_topology_generation
+            .fetch_add(1, Ordering::Release);
 
         // C4D510 consumes outer+0x4B on its next callback by calling the
         // native secondary submit, then clears the byte itself. This keeps
         // the update at the game's authoritative one-shot boundary instead
         // of repairing core/child state every frame.
-        let still_bound = CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire) == owner
+        let still_bound = unit_state.cloth_instance_owners[slot].load(Ordering::Acquire) == owner
             && target_cloth_input(slot, target_input).is_some()
             && read_usize(owner.saturating_add(0x40)) == Some(inner)
             && read_usize(inner.saturating_add(0x30)) == Some(core);
         if still_bound && mark_secondary_reference_dirty(owner) {
-            CLOTH_SECONDARY_DIRTY_MARKED.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .cloth_secondary_dirty_marked
+                .fetch_add(1, Ordering::Relaxed);
         } else {
-            CLOTH_SECONDARY_DIRTY_REJECTED.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .cloth_secondary_dirty_rejected
+                .fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -2548,9 +2619,12 @@ fn cloth_inner_commit_hook(registers: *mut Registers, original: usize) -> usize 
 }
 
 fn sync_target_cloth_attachment_positions(inner: usize, current_transform: usize) {
+    let unit_state = current_unit_state();
     let base = MODULE_BASE.load(Ordering::Acquire);
-    let target_input = TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire);
-    let requested_bits = TARGET_SCALE_BITS.load(Ordering::Acquire);
+    let target_input = unit_state
+        .target_cloth_pose_importer
+        .load(Ordering::Acquire);
+    let requested_bits = unit_state.target_scale_bits.load(Ordering::Acquire);
     let requested_scale = f32::from_bits(requested_bits);
     if target_input == 0 || !valid_active_scale(requested_scale) {
         return;
@@ -2559,10 +2633,11 @@ fn sync_target_cloth_attachment_positions(inner: usize, current_transform: usize
     let expected_outer_vtable = base.saturating_add(ER_CLOTH_MODEL_VTABLE_RVA);
     let expected_inner_vtable = base.saturating_add(ER_CLOTH_INNER_VTABLE_RVA);
     for slot in 0..CLOTH_INSTANCE_SLOTS {
-        let owner = CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire);
+        let owner = unit_state.cloth_instance_owners[slot].load(Ordering::Acquire);
         if owner == 0
-            || CLOTH_INSTANCE_INPUTS[slot].load(Ordering::Acquire) != target_input
-            || CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].load(Ordering::Acquire) != requested_bits
+            || unit_state.cloth_instance_inputs[slot].load(Ordering::Acquire) != target_input
+            || unit_state.cloth_instance_applied_scale_bits[slot].load(Ordering::Acquire)
+                != requested_bits
             || read_usize(owner.saturating_add(0x40)) != Some(inner)
             || read_usize(owner.saturating_add(0x120)) != Some(target_input)
             || current_transform != owner.saturating_add(CLOTH_MAIN_TRANSFORM_OFFSET)
@@ -2572,16 +2647,20 @@ fn sync_target_cloth_attachment_positions(inner: usize, current_transform: usize
             continue;
         }
 
-        let core = CLOTH_INSTANCE_CORES[slot].load(Ordering::Acquire);
+        let core = unit_state.cloth_instance_cores[slot].load(Ordering::Acquire);
         if core == 0 || read_usize(inner.saturating_add(0x30)) != Some(core) {
             return;
         }
         let Some(root_matrix) = read_matrix(current_transform) else {
-            CLOTH_TRANSFORM_RESYNC_TOPOLOGY_REJECTED.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .cloth_transform_resync_topology_rejected
+                .fetch_add(1, Ordering::Relaxed);
             return;
         };
         if !cloth_matrix_array_basis_matches_scale(&root_matrix, requested_scale) {
-            CLOTH_TRANSFORM_RESYNC_TOPOLOGY_REJECTED.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .cloth_transform_resync_topology_rejected
+                .fetch_add(1, Ordering::Relaxed);
             return;
         }
 
@@ -2596,20 +2675,43 @@ fn sync_target_cloth_attachment_positions(inner: usize, current_transform: usize
 }
 
 fn record_cloth_position_sync_counts(counts: ClothTransformResyncCounts) {
-    CLOTH_TRANSFORM_RESYNC_CALLS.fetch_add(1, Ordering::Relaxed);
-    CLOTH_TRANSFORM_RESYNC_CHILDREN_OBSERVED.fetch_add(counts.children_observed, Ordering::Relaxed);
-    CLOTH_TRANSFORM_RESYNC_CHILDREN_CHANGED.fetch_add(counts.children_changed, Ordering::Relaxed);
-    CLOTH_TRANSFORM_RESYNC_ENTRIES_OBSERVED.fetch_add(counts.entries_observed, Ordering::Relaxed);
-    CLOTH_TRANSFORM_RESYNC_ENTRIES_CHANGED.fetch_add(counts.entries_changed, Ordering::Relaxed);
-    CLOTH_TRANSFORM_RESYNC_ENTRIES_ALREADY_SCALED
+    let unit_state = current_unit_state();
+    unit_state
+        .cloth_transform_resync_calls
+        .fetch_add(1, Ordering::Relaxed);
+    unit_state
+        .cloth_transform_resync_children_observed
+        .fetch_add(counts.children_observed, Ordering::Relaxed);
+    unit_state
+        .cloth_transform_resync_children_changed
+        .fetch_add(counts.children_changed, Ordering::Relaxed);
+    unit_state
+        .cloth_transform_resync_entries_observed
+        .fetch_add(counts.entries_observed, Ordering::Relaxed);
+    unit_state
+        .cloth_transform_resync_entries_changed
+        .fetch_add(counts.entries_changed, Ordering::Relaxed);
+    unit_state
+        .cloth_transform_resync_entries_already_scaled
         .fetch_add(counts.entries_already_scaled, Ordering::Relaxed);
-    CLOTH_TRANSFORM_RESYNC_ENTRIES_REJECTED.fetch_add(counts.entries_rejected, Ordering::Relaxed);
-    CLOTH_TRANSFORM_RESYNC_TOPOLOGY_REJECTED.fetch_add(counts.topology_rejected, Ordering::Relaxed);
-    CLOTH_ATTACHMENT_POSITION_BUFFERS_SHIFTED
+    unit_state
+        .cloth_transform_resync_entries_rejected
+        .fetch_add(counts.entries_rejected, Ordering::Relaxed);
+    unit_state
+        .cloth_transform_resync_topology_rejected
+        .fetch_add(counts.topology_rejected, Ordering::Relaxed);
+    unit_state
+        .cloth_attachment_position_buffers_shifted
         .fetch_add(counts.position_buffers_shifted, Ordering::Relaxed);
-    CLOTH_ATTACHMENT_PARTICLES_SHIFTED.fetch_add(counts.particles_shifted, Ordering::Relaxed);
-    CLOTH_ATTACHMENT_AABBS_SHIFTED.fetch_add(counts.aabbs_shifted, Ordering::Relaxed);
-    CLOTH_ATTACHMENT_POSITION_REJECTED.fetch_add(counts.position_rejected, Ordering::Relaxed);
+    unit_state
+        .cloth_attachment_particles_shifted
+        .fetch_add(counts.particles_shifted, Ordering::Relaxed);
+    unit_state
+        .cloth_attachment_aabbs_shifted
+        .fetch_add(counts.aabbs_shifted, Ordering::Relaxed);
+    unit_state
+        .cloth_attachment_position_rejected
+        .fetch_add(counts.position_rejected, Ordering::Relaxed);
 }
 
 fn record_cloth_instance_binding(owner: usize, input: usize) {
@@ -2617,44 +2719,56 @@ fn record_cloth_instance_binding(owner: usize, input: usize) {
 }
 
 fn observe_cloth_instance_binding(owner: usize, input: usize, from_setter: bool) {
+    let unit_state = current_unit_state();
     if owner == 0 {
         return;
     }
     let hits = u64::from(from_setter);
-    CLOTH_SETTER_CALLS.fetch_add(hits, Ordering::Relaxed);
+    unit_state
+        .cloth_setter_calls
+        .fetch_add(hits, Ordering::Relaxed);
 
     for slot in 0..CLOTH_INSTANCE_SLOTS {
-        if CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire) == owner {
-            if CLOTH_INSTANCE_INPUTS[slot].load(Ordering::Acquire) != input {
+        if unit_state.cloth_instance_owners[slot].load(Ordering::Acquire) == owner {
+            if unit_state.cloth_instance_inputs[slot].load(Ordering::Acquire) != input {
                 cancel_pending_cloth_transition(slot);
-                CLOTH_TOPOLOGY_GENERATION.fetch_add(1, Ordering::Release);
+                unit_state
+                    .cloth_topology_generation
+                    .fetch_add(1, Ordering::Release);
             }
-            CLOTH_INSTANCE_INPUTS[slot].store(input, Ordering::Release);
-            CLOTH_INSTANCE_SETTER_HITS[slot].fetch_add(hits, Ordering::Relaxed);
+            unit_state.cloth_instance_inputs[slot].store(input, Ordering::Release);
+            unit_state.cloth_instance_setter_hits[slot].fetch_add(hits, Ordering::Relaxed);
             return;
         }
     }
 
     for slot in 0..CLOTH_INSTANCE_SLOTS {
-        if CLOTH_INSTANCE_OWNERS[slot]
+        if unit_state.cloth_instance_owners[slot]
             .compare_exchange(0, owner, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
         {
-            CLOTH_INSTANCE_INPUTS[slot].store(input, Ordering::Release);
-            CLOTH_INSTANCE_SETTER_HITS[slot].store(hits, Ordering::Release);
-            CLOTH_INSTANCE_WAS_EQUIPMENT[slot].store(false, Ordering::Release);
-            CLOTH_INSTANCE_SOURCE_CALLS[slot].store(0, Ordering::Release);
-            CLOTH_INSTANCE_COMMITS[slot].store(0, Ordering::Release);
+            unit_state.cloth_instance_inputs[slot].store(input, Ordering::Release);
+            unit_state.cloth_instance_setter_hits[slot].store(hits, Ordering::Release);
+            unit_state.cloth_instance_was_equipment[slot].store(false, Ordering::Release);
+            unit_state.cloth_instance_source_calls[slot].store(0, Ordering::Release);
+            unit_state.cloth_instance_commits[slot].store(0, Ordering::Release);
             reset_cloth_slot_scale_state(slot, 0);
-            CLOTH_SLOT_INSERTS.fetch_add(1, Ordering::Relaxed);
-            CLOTH_TOPOLOGY_GENERATION.fetch_add(1, Ordering::Release);
+            unit_state
+                .cloth_slot_inserts
+                .fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .cloth_topology_generation
+                .fetch_add(1, Ordering::Release);
             return;
         }
     }
 
-    let start = CLOTH_REPLACEMENT_CURSOR.fetch_add(1, Ordering::Relaxed) % CLOTH_INSTANCE_SLOTS;
+    let start = unit_state
+        .cloth_replacement_cursor
+        .fetch_add(1, Ordering::Relaxed)
+        % CLOTH_INSTANCE_SLOTS;
     // A stream of NPC setters cannot evict the <=27 current equipment owners.
-    let Ok(scope) = TARGET_CLOTH_SCOPE.try_read() else {
+    let Ok(scope) = unit_state.target_cloth_scope.try_read() else {
         return;
     };
     let Some(slot) = (0..CLOTH_INSTANCE_SLOTS)
@@ -2662,8 +2776,8 @@ fn observe_cloth_instance_binding(owner: usize, input: usize, from_setter: bool)
         .find(|&slot| {
             scope
                 .find(
-                    CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire),
-                    CLOTH_INSTANCE_INPUTS[slot].load(Ordering::Acquire),
+                    unit_state.cloth_instance_owners[slot].load(Ordering::Acquire),
+                    unit_state.cloth_instance_inputs[slot].load(Ordering::Acquire),
                 )
                 .is_none()
         })
@@ -2675,26 +2789,32 @@ fn observe_cloth_instance_binding(owner: usize, input: usize, from_setter: bool)
     // before publishing a snapshot, so a concurrent replacement can only
     // suppress one sample; it cannot make an unrelated object pass the filter.
     reset_cloth_slot_scale_state(slot, 0);
-    CLOTH_INSTANCE_INPUTS[slot].store(input, Ordering::Release);
-    CLOTH_INSTANCE_SETTER_HITS[slot].store(hits, Ordering::Release);
-    CLOTH_INSTANCE_WAS_EQUIPMENT[slot].store(false, Ordering::Release);
-    CLOTH_INSTANCE_SOURCE_CALLS[slot].store(0, Ordering::Release);
-    CLOTH_INSTANCE_COMMITS[slot].store(0, Ordering::Release);
-    CLOTH_INSTANCE_OWNERS[slot].store(owner, Ordering::Release);
-    CLOTH_SLOT_REPLACEMENTS.fetch_add(1, Ordering::Relaxed);
-    CLOTH_TOPOLOGY_GENERATION.fetch_add(1, Ordering::Release);
+    unit_state.cloth_instance_inputs[slot].store(input, Ordering::Release);
+    unit_state.cloth_instance_setter_hits[slot].store(hits, Ordering::Release);
+    unit_state.cloth_instance_was_equipment[slot].store(false, Ordering::Release);
+    unit_state.cloth_instance_source_calls[slot].store(0, Ordering::Release);
+    unit_state.cloth_instance_commits[slot].store(0, Ordering::Release);
+    unit_state.cloth_instance_owners[slot].store(owner, Ordering::Release);
+    unit_state
+        .cloth_slot_replacements
+        .fetch_add(1, Ordering::Relaxed);
+    unit_state
+        .cloth_topology_generation
+        .fetch_add(1, Ordering::Release);
 }
 
 pub fn cloth_topology_generation() -> u64 {
-    CLOTH_TOPOLOGY_GENERATION.load(Ordering::Acquire)
+    let unit_state = current_unit_state();
+    unit_state.cloth_topology_generation.load(Ordering::Acquire)
 }
 
 fn cancel_pending_cloth_transition(slot: usize) {
-    let pending_bits = CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].load(Ordering::Acquire);
+    let unit_state = current_unit_state();
+    let pending_bits = unit_state.cloth_instance_pending_scale_bits[slot].load(Ordering::Acquire);
     if pending_bits == NO_PENDING_CLOTH_SCALE_BITS || pending_bits == IN_PROGRESS_CLOTH_SCALE_BITS {
         return;
     }
-    if CLOTH_INSTANCE_PENDING_SCALE_BITS[slot]
+    if unit_state.cloth_instance_pending_scale_bits[slot]
         .compare_exchange(
             pending_bits,
             NO_PENDING_CLOTH_SCALE_BITS,
@@ -2703,15 +2823,21 @@ fn cancel_pending_cloth_transition(slot: usize) {
         )
         .is_ok()
     {
-        CLOTH_PENDING_SLOT_MASK.fetch_and(!(1u64 << slot), Ordering::AcqRel);
+        unit_state
+            .cloth_pending_slot_mask
+            .fetch_and(!(1u64 << slot), Ordering::AcqRel);
     }
 }
 
 fn reset_cloth_slot_scale_state(slot: usize, core: usize) {
-    CLOTH_PENDING_SLOT_MASK.fetch_and(!(1u64 << slot), Ordering::AcqRel);
-    CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(NO_PENDING_CLOTH_SCALE_BITS, Ordering::Release);
-    CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].store(1.0f32.to_bits(), Ordering::Release);
-    CLOTH_INSTANCE_CORES[slot].store(core, Ordering::Release);
+    let unit_state = current_unit_state();
+    unit_state
+        .cloth_pending_slot_mask
+        .fetch_and(!(1u64 << slot), Ordering::AcqRel);
+    unit_state.cloth_instance_pending_scale_bits[slot]
+        .store(NO_PENDING_CLOTH_SCALE_BITS, Ordering::Release);
+    unit_state.cloth_instance_applied_scale_bits[slot].store(1.0f32.to_bits(), Ordering::Release);
+    unit_state.cloth_instance_cores[slot].store(core, Ordering::Release);
 }
 
 fn should_stage_cloth_transition(
@@ -2729,6 +2855,7 @@ pub fn queue_cloth_scale_transitions(target_input: usize, requested_scale: f32) 
 }
 
 fn queue_cloth_scale_transitions_inner(target_input: usize, requested_scale: f32) -> usize {
+    let unit_state = current_unit_state();
     if target_input == 0 || !valid_scale(requested_scale) {
         return 0;
     }
@@ -2739,8 +2866,8 @@ fn queue_cloth_scale_transitions_inner(target_input: usize, requested_scale: f32
     let expected_inner_vtable = base.saturating_add(ER_CLOTH_INNER_VTABLE_RVA);
     let mut queued = 0usize;
     for slot in 0..CLOTH_INSTANCE_SLOTS {
-        let owner = CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire);
-        let captured_input = CLOTH_INSTANCE_INPUTS[slot].load(Ordering::Acquire);
+        let owner = unit_state.cloth_instance_owners[slot].load(Ordering::Acquire);
+        let captured_input = unit_state.cloth_instance_inputs[slot].load(Ordering::Acquire);
         if owner == 0
             || target_cloth_input(slot, target_input) != Some(captured_input)
             || !object_has_vtable(owner, expected_vtable)
@@ -2754,20 +2881,27 @@ fn queue_cloth_scale_transitions_inner(target_input: usize, requested_scale: f32
         let inner_enabled =
             matches!(read_u8(inner.saturating_add(0x60)), Some(value) if value != 0);
         if !object_has_vtable(inner, expected_inner_vtable) || !inner_enabled {
-            CLOTH_SCALE_TRANSITIONS_DEFERRED.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .cloth_scale_transitions_deferred
+                .fetch_add(1, Ordering::Relaxed);
             continue;
         }
         let core = read_usize(inner.saturating_add(0x30)).unwrap_or(0);
         if core == 0 {
-            CLOTH_SCALE_TRANSITIONS_DEFERRED.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .cloth_scale_transitions_deferred
+                .fetch_add(1, Ordering::Relaxed);
             continue;
         }
-        if CLOTH_INSTANCE_CORES[slot].load(Ordering::Acquire) != core {
+        if unit_state.cloth_instance_cores[slot].load(Ordering::Acquire) != core {
             reset_cloth_slot_scale_state(slot, core);
-            CLOTH_TOPOLOGY_GENERATION.fetch_add(1, Ordering::Release);
+            unit_state
+                .cloth_topology_generation
+                .fetch_add(1, Ordering::Release);
         }
 
-        let pending_bits = CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].load(Ordering::Acquire);
+        let pending_bits =
+            unit_state.cloth_instance_pending_scale_bits[slot].load(Ordering::Acquire);
         if pending_bits != NO_PENDING_CLOTH_SCALE_BITS
             && pending_bits != IN_PROGRESS_CLOTH_SCALE_BITS
             && pending_bits != requested_bits
@@ -2775,24 +2909,28 @@ fn queue_cloth_scale_transitions_inner(target_input: usize, requested_scale: f32
             cancel_pending_cloth_transition(slot);
         }
 
-        let applied_bits = CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].load(Ordering::Acquire);
-        let pending_bits = CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].load(Ordering::Acquire);
+        let applied_bits =
+            unit_state.cloth_instance_applied_scale_bits[slot].load(Ordering::Acquire);
+        let pending_bits =
+            unit_state.cloth_instance_pending_scale_bits[slot].load(Ordering::Acquire);
         if !should_stage_cloth_transition(applied_bits, pending_bits, requested_bits) {
             continue;
         }
 
-        if CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire) != owner
+        if unit_state.cloth_instance_owners[slot].load(Ordering::Acquire) != owner
             || target_cloth_input(slot, target_input) != Some(captured_input)
             || !object_has_vtable(owner, expected_vtable)
             || read_usize(owner.saturating_add(0x120)) != Some(captured_input)
             || read_usize(owner.saturating_add(0x40)) != Some(inner)
             || read_usize(inner.saturating_add(0x30)) != Some(core)
         {
-            CLOTH_SCALE_TRANSITIONS_REJECTED.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .cloth_scale_transitions_rejected
+                .fetch_add(1, Ordering::Relaxed);
             continue;
         }
 
-        if CLOTH_INSTANCE_PENDING_SCALE_BITS[slot]
+        if unit_state.cloth_instance_pending_scale_bits[slot]
             .compare_exchange(
                 NO_PENDING_CLOTH_SCALE_BITS,
                 requested_bits,
@@ -2803,111 +2941,211 @@ fn queue_cloth_scale_transitions_inner(target_input: usize, requested_scale: f32
         {
             continue;
         }
-        CLOTH_PENDING_SLOT_MASK.fetch_or(1u64 << slot, Ordering::Release);
-        CLOTH_SCALE_TRANSITIONS_QUEUED.fetch_add(1, Ordering::Relaxed);
+        unit_state
+            .cloth_pending_slot_mask
+            .fetch_or(1u64 << slot, Ordering::Release);
+        unit_state
+            .cloth_scale_transitions_queued
+            .fetch_add(1, Ordering::Relaxed);
         queued += 1;
     }
     queued
 }
 
 pub fn has_pending_cloth_scale_transitions() -> bool {
-    CLOTH_PENDING_SLOT_MASK.load(Ordering::Acquire) != 0
+    let unit_state = current_unit_state();
+    unit_state.cloth_pending_slot_mask.load(Ordering::Acquire) != 0
 }
 
 pub fn cloth_instance_probe_counters() -> ClothInstanceProbeCounters {
+    let unit_state = current_unit_state();
     ClothInstanceProbeCounters {
-        setter_calls: CLOTH_SETTER_CALLS.load(Ordering::Acquire),
-        slot_inserts: CLOTH_SLOT_INSERTS.load(Ordering::Acquire),
-        slot_replacements: CLOTH_SLOT_REPLACEMENTS.load(Ordering::Acquire),
-        occupied_slots: CLOTH_INSTANCE_OWNERS
+        setter_calls: unit_state.cloth_setter_calls.load(Ordering::Acquire),
+        slot_inserts: unit_state.cloth_slot_inserts.load(Ordering::Acquire),
+        slot_replacements: unit_state.cloth_slot_replacements.load(Ordering::Acquire),
+        occupied_slots: unit_state
+            .cloth_instance_owners
             .iter()
             .filter(|owner| owner.load(Ordering::Acquire) != 0)
             .count(),
-        scale_transitions_queued: CLOTH_SCALE_TRANSITIONS_QUEUED.load(Ordering::Acquire),
-        scale_transitions_deferred: CLOTH_SCALE_TRANSITIONS_DEFERRED.load(Ordering::Acquire),
-        scale_transitions_rejected: CLOTH_SCALE_TRANSITIONS_REJECTED.load(Ordering::Acquire),
-        scale_reference_commits: CLOTH_SCALE_REFERENCE_COMMITS.load(Ordering::Acquire),
-        scale_wrapper_deferred: CLOTH_SCALE_WRAPPER_DEFERRED.load(Ordering::Acquire),
-        scale_wrapper_rejected: CLOTH_SCALE_WRAPPER_REJECTED.load(Ordering::Acquire),
-        secondary_reference_calls: CLOTH_SECONDARY_REFERENCE_CALLS.load(Ordering::Acquire),
-        secondary_reference_adjusted: CLOTH_SECONDARY_REFERENCE_ADJUSTED.load(Ordering::Acquire),
-        secondary_reference_passthrough: CLOTH_SECONDARY_REFERENCE_PASSTHROUGH
+        scale_transitions_queued: unit_state
+            .cloth_scale_transitions_queued
             .load(Ordering::Acquire),
-        secondary_reference_rejected: CLOTH_SECONDARY_REFERENCE_REJECTED.load(Ordering::Acquire),
-        secondary_probe_calls: CLOTH_SECONDARY_PROBE_CALLS.load(Ordering::Acquire),
-        secondary_source_owner_e0_matches: CLOTH_SECONDARY_SOURCE_OWNER_E0_MATCHES
+        scale_transitions_deferred: unit_state
+            .cloth_scale_transitions_deferred
             .load(Ordering::Acquire),
-        secondary_source_owner_e0_mismatches: CLOTH_SECONDARY_SOURCE_OWNER_E0_MISMATCHES
+        scale_transitions_rejected: unit_state
+            .cloth_scale_transitions_rejected
             .load(Ordering::Acquire),
-        secondary_pre_core_requested: CLOTH_SECONDARY_PRE_CORE_REQUESTED.load(Ordering::Acquire),
-        secondary_pre_core_unit: CLOTH_SECONDARY_PRE_CORE_UNIT.load(Ordering::Acquire),
-        secondary_pre_core_other: CLOTH_SECONDARY_PRE_CORE_OTHER.load(Ordering::Acquire),
-        secondary_post_core_requested: CLOTH_SECONDARY_POST_CORE_REQUESTED.load(Ordering::Acquire),
-        secondary_post_core_unit: CLOTH_SECONDARY_POST_CORE_UNIT.load(Ordering::Acquire),
-        secondary_post_core_other: CLOTH_SECONDARY_POST_CORE_OTHER.load(Ordering::Acquire),
-        secondary_post_copy_matches: CLOTH_SECONDARY_POST_COPY_MATCHES.load(Ordering::Acquire),
-        secondary_post_copy_mismatches: CLOTH_SECONDARY_POST_COPY_MISMATCHES
+        scale_reference_commits: unit_state
+            .cloth_scale_reference_commits
             .load(Ordering::Acquire),
-        secondary_core_changed: CLOTH_SECONDARY_CORE_CHANGED.load(Ordering::Acquire),
-        secondary_dirty_marked: CLOTH_SECONDARY_DIRTY_MARKED.load(Ordering::Acquire),
-        secondary_dirty_rejected: CLOTH_SECONDARY_DIRTY_REJECTED.load(Ordering::Acquire),
-        solver_source_bracket_calls: CLOTH_SOLVER_SOURCE_BRACKET_CALLS.load(Ordering::Acquire),
-        solver_source_bracket_transforms: CLOTH_SOLVER_SOURCE_BRACKET_TRANSFORMS
+        scale_wrapper_deferred: unit_state
+            .cloth_scale_wrapper_deferred
             .load(Ordering::Acquire),
-        solver_source_bracket_restores: CLOTH_SOLVER_SOURCE_BRACKET_RESTORES
+        scale_wrapper_rejected: unit_state
+            .cloth_scale_wrapper_rejected
             .load(Ordering::Acquire),
-        solver_source_bracket_rejected: CLOTH_SOLVER_SOURCE_BRACKET_REJECTED
+        secondary_reference_calls: unit_state
+            .cloth_secondary_reference_calls
             .load(Ordering::Acquire),
-        solver_source_direct_transforms: CLOTH_SOLVER_SOURCE_DIRECT_TRANSFORMS
+        secondary_reference_adjusted: unit_state
+            .cloth_secondary_reference_adjusted
             .load(Ordering::Acquire),
-        solver_source_lazy_candidates: CLOTH_SOLVER_SOURCE_LAZY_CANDIDATES.load(Ordering::Acquire),
-        solver_source_lazy_resolved: CLOTH_SOLVER_SOURCE_LAZY_RESOLVED.load(Ordering::Acquire),
-        solver_source_lazy_rejected: CLOTH_SOLVER_SOURCE_LAZY_REJECTED.load(Ordering::Acquire),
-        solver_source_local_scale_calls: CLOTH_SOLVER_SOURCE_LOCAL_SCALE_CALLS
+        secondary_reference_passthrough: unit_state
+            .cloth_secondary_reference_passthrough
             .load(Ordering::Acquire),
-        solver_source_local_scale_transforms: CLOTH_SOLVER_SOURCE_LOCAL_SCALE_TRANSFORMS
+        secondary_reference_rejected: unit_state
+            .cloth_secondary_reference_rejected
             .load(Ordering::Acquire),
-        solver_source_local_scale_restores: CLOTH_SOLVER_SOURCE_LOCAL_SCALE_RESTORES
+        secondary_probe_calls: unit_state
+            .cloth_secondary_probe_calls
             .load(Ordering::Acquire),
-        solver_source_local_scale_rejected: CLOTH_SOLVER_SOURCE_LOCAL_SCALE_REJECTED
+        secondary_source_owner_e0_matches: unit_state
+            .cloth_secondary_source_owner_e0_matches
             .load(Ordering::Acquire),
-        solver_source_local_scale_passthrough: CLOTH_SOLVER_SOURCE_LOCAL_SCALE_PASSTHROUGH
+        secondary_source_owner_e0_mismatches: unit_state
+            .cloth_secondary_source_owner_e0_mismatches
             .load(Ordering::Acquire),
-        solver_private_context_calls: CLOTH_SOLVER_PRIVATE_CONTEXT_CALLS.load(Ordering::Acquire),
-        solver_private_context_returns: CLOTH_SOLVER_PRIVATE_CONTEXT_RETURNS
+        secondary_pre_core_requested: unit_state
+            .cloth_secondary_pre_core_requested
             .load(Ordering::Acquire),
-        immediate_probe_transitions: CLOTH_IMMEDIATE_PROBE_TRANSITIONS.load(Ordering::Acquire),
-        immediate_children_observed: CLOTH_IMMEDIATE_CHILDREN_OBSERVED.load(Ordering::Acquire),
-        immediate_particle_matches: CLOTH_IMMEDIATE_PARTICLE_MATCHES.load(Ordering::Acquire),
-        immediate_transform_matches: CLOTH_IMMEDIATE_TRANSFORM_MATCHES.load(Ordering::Acquire),
-        immediate_both_matches: CLOTH_IMMEDIATE_BOTH_MATCHES.load(Ordering::Acquire),
-        immediate_unreadable: CLOTH_IMMEDIATE_UNREADABLE.load(Ordering::Acquire),
-        transform_resync_calls: CLOTH_TRANSFORM_RESYNC_CALLS.load(Ordering::Acquire),
-        transform_resync_children_observed: CLOTH_TRANSFORM_RESYNC_CHILDREN_OBSERVED
+        secondary_pre_core_unit: unit_state
+            .cloth_secondary_pre_core_unit
             .load(Ordering::Acquire),
-        transform_resync_children_changed: CLOTH_TRANSFORM_RESYNC_CHILDREN_CHANGED
+        secondary_pre_core_other: unit_state
+            .cloth_secondary_pre_core_other
             .load(Ordering::Acquire),
-        transform_resync_entries_observed: CLOTH_TRANSFORM_RESYNC_ENTRIES_OBSERVED
+        secondary_post_core_requested: unit_state
+            .cloth_secondary_post_core_requested
             .load(Ordering::Acquire),
-        transform_resync_entries_changed: CLOTH_TRANSFORM_RESYNC_ENTRIES_CHANGED
+        secondary_post_core_unit: unit_state
+            .cloth_secondary_post_core_unit
             .load(Ordering::Acquire),
-        transform_resync_entries_already_scaled: CLOTH_TRANSFORM_RESYNC_ENTRIES_ALREADY_SCALED
+        secondary_post_core_other: unit_state
+            .cloth_secondary_post_core_other
             .load(Ordering::Acquire),
-        transform_resync_entries_rejected: CLOTH_TRANSFORM_RESYNC_ENTRIES_REJECTED
+        secondary_post_copy_matches: unit_state
+            .cloth_secondary_post_copy_matches
             .load(Ordering::Acquire),
-        transform_resync_topology_rejected: CLOTH_TRANSFORM_RESYNC_TOPOLOGY_REJECTED
+        secondary_post_copy_mismatches: unit_state
+            .cloth_secondary_post_copy_mismatches
             .load(Ordering::Acquire),
-        attachment_position_buffers_shifted: CLOTH_ATTACHMENT_POSITION_BUFFERS_SHIFTED
+        secondary_core_changed: unit_state
+            .cloth_secondary_core_changed
             .load(Ordering::Acquire),
-        attachment_particles_shifted: CLOTH_ATTACHMENT_PARTICLES_SHIFTED.load(Ordering::Acquire),
-        attachment_aabbs_shifted: CLOTH_ATTACHMENT_AABBS_SHIFTED.load(Ordering::Acquire),
-        attachment_position_rejected: CLOTH_ATTACHMENT_POSITION_REJECTED.load(Ordering::Acquire),
+        secondary_dirty_marked: unit_state
+            .cloth_secondary_dirty_marked
+            .load(Ordering::Acquire),
+        secondary_dirty_rejected: unit_state
+            .cloth_secondary_dirty_rejected
+            .load(Ordering::Acquire),
+        solver_source_bracket_calls: unit_state
+            .cloth_solver_source_bracket_calls
+            .load(Ordering::Acquire),
+        solver_source_bracket_transforms: unit_state
+            .cloth_solver_source_bracket_transforms
+            .load(Ordering::Acquire),
+        solver_source_bracket_restores: unit_state
+            .cloth_solver_source_bracket_restores
+            .load(Ordering::Acquire),
+        solver_source_bracket_rejected: unit_state
+            .cloth_solver_source_bracket_rejected
+            .load(Ordering::Acquire),
+        solver_source_direct_transforms: unit_state
+            .cloth_solver_source_direct_transforms
+            .load(Ordering::Acquire),
+        solver_source_lazy_candidates: unit_state
+            .cloth_solver_source_lazy_candidates
+            .load(Ordering::Acquire),
+        solver_source_lazy_resolved: unit_state
+            .cloth_solver_source_lazy_resolved
+            .load(Ordering::Acquire),
+        solver_source_lazy_rejected: unit_state
+            .cloth_solver_source_lazy_rejected
+            .load(Ordering::Acquire),
+        solver_source_local_scale_calls: unit_state
+            .cloth_solver_source_local_scale_calls
+            .load(Ordering::Acquire),
+        solver_source_local_scale_transforms: unit_state
+            .cloth_solver_source_local_scale_transforms
+            .load(Ordering::Acquire),
+        solver_source_local_scale_restores: unit_state
+            .cloth_solver_source_local_scale_restores
+            .load(Ordering::Acquire),
+        solver_source_local_scale_rejected: unit_state
+            .cloth_solver_source_local_scale_rejected
+            .load(Ordering::Acquire),
+        solver_source_local_scale_passthrough: unit_state
+            .cloth_solver_source_local_scale_passthrough
+            .load(Ordering::Acquire),
+        solver_private_context_calls: unit_state
+            .cloth_solver_private_context_calls
+            .load(Ordering::Acquire),
+        solver_private_context_returns: unit_state
+            .cloth_solver_private_context_returns
+            .load(Ordering::Acquire),
+        immediate_probe_transitions: unit_state
+            .cloth_immediate_probe_transitions
+            .load(Ordering::Acquire),
+        immediate_children_observed: unit_state
+            .cloth_immediate_children_observed
+            .load(Ordering::Acquire),
+        immediate_particle_matches: unit_state
+            .cloth_immediate_particle_matches
+            .load(Ordering::Acquire),
+        immediate_transform_matches: unit_state
+            .cloth_immediate_transform_matches
+            .load(Ordering::Acquire),
+        immediate_both_matches: unit_state
+            .cloth_immediate_both_matches
+            .load(Ordering::Acquire),
+        immediate_unreadable: unit_state
+            .cloth_immediate_unreadable
+            .load(Ordering::Acquire),
+        transform_resync_calls: unit_state
+            .cloth_transform_resync_calls
+            .load(Ordering::Acquire),
+        transform_resync_children_observed: unit_state
+            .cloth_transform_resync_children_observed
+            .load(Ordering::Acquire),
+        transform_resync_children_changed: unit_state
+            .cloth_transform_resync_children_changed
+            .load(Ordering::Acquire),
+        transform_resync_entries_observed: unit_state
+            .cloth_transform_resync_entries_observed
+            .load(Ordering::Acquire),
+        transform_resync_entries_changed: unit_state
+            .cloth_transform_resync_entries_changed
+            .load(Ordering::Acquire),
+        transform_resync_entries_already_scaled: unit_state
+            .cloth_transform_resync_entries_already_scaled
+            .load(Ordering::Acquire),
+        transform_resync_entries_rejected: unit_state
+            .cloth_transform_resync_entries_rejected
+            .load(Ordering::Acquire),
+        transform_resync_topology_rejected: unit_state
+            .cloth_transform_resync_topology_rejected
+            .load(Ordering::Acquire),
+        attachment_position_buffers_shifted: unit_state
+            .cloth_attachment_position_buffers_shifted
+            .load(Ordering::Acquire),
+        attachment_particles_shifted: unit_state
+            .cloth_attachment_particles_shifted
+            .load(Ordering::Acquire),
+        attachment_aabbs_shifted: unit_state
+            .cloth_attachment_aabbs_shifted
+            .load(Ordering::Acquire),
+        attachment_position_rejected: unit_state
+            .cloth_attachment_position_rejected
+            .load(Ordering::Acquire),
     }
 }
 
 pub fn cloth_instance_snapshots(
     target_input: usize,
 ) -> [ClothInstanceSnapshot; CLOTH_INSTANCE_SLOTS] {
+    let unit_state = current_unit_state();
     let mut snapshots = [ClothInstanceSnapshot::default(); CLOTH_INSTANCE_SLOTS];
     if target_input == 0 {
         return snapshots;
@@ -2916,8 +3154,8 @@ pub fn cloth_instance_snapshots(
     let base = MODULE_BASE.load(Ordering::Acquire);
     let expected_vtable = base.saturating_add(ER_CLOTH_MODEL_VTABLE_RVA);
     for (slot, snapshot) in snapshots.iter_mut().enumerate() {
-        let owner = CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire);
-        let captured_input = CLOTH_INSTANCE_INPUTS[slot].load(Ordering::Acquire);
+        let owner = unit_state.cloth_instance_owners[slot].load(Ordering::Acquire);
+        let captured_input = unit_state.cloth_instance_inputs[slot].load(Ordering::Acquire);
         if owner == 0
             || target_cloth_input(slot, target_input) != Some(captured_input)
             || !object_has_vtable(owner, expected_vtable)
@@ -2942,12 +3180,14 @@ pub fn cloth_instance_snapshots(
             slot,
             owner,
             input: captured_input,
-            setter_hits: CLOTH_INSTANCE_SETTER_HITS[slot].load(Ordering::Acquire),
-            equipment_owned: CLOTH_INSTANCE_WAS_EQUIPMENT[slot].load(Ordering::Acquire),
-            source_calls: CLOTH_INSTANCE_SOURCE_CALLS[slot].load(Ordering::Acquire),
-            reference_commits: CLOTH_INSTANCE_COMMITS[slot].load(Ordering::Acquire),
-            applied_scale_bits: CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].load(Ordering::Acquire),
-            pending_scale_bits: CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].load(Ordering::Acquire),
+            setter_hits: unit_state.cloth_instance_setter_hits[slot].load(Ordering::Acquire),
+            equipment_owned: unit_state.cloth_instance_was_equipment[slot].load(Ordering::Acquire),
+            source_calls: unit_state.cloth_instance_source_calls[slot].load(Ordering::Acquire),
+            reference_commits: unit_state.cloth_instance_commits[slot].load(Ordering::Acquire),
+            applied_scale_bits: unit_state.cloth_instance_applied_scale_bits[slot]
+                .load(Ordering::Acquire),
+            pending_scale_bits: unit_state.cloth_instance_pending_scale_bits[slot]
+                .load(Ordering::Acquire),
             inner,
             inner_vtable,
             outer_flags,
@@ -3127,6 +3367,7 @@ fn solver_input_transform_total(current: usize, additional: usize) -> Option<usi
 /// every pre-physics frame to notice equipment changes without recreating the
 /// heavy profiling work that caused the earlier scaling hitch.
 pub fn target_cloth_simulation_set(target_input: usize) -> TargetClothSimulationSet {
+    let unit_state = current_unit_state();
     let mut result = TargetClothSimulationSet::default();
     if target_input == 0 {
         return result;
@@ -3136,7 +3377,7 @@ pub fn target_cloth_simulation_set(target_input: usize) -> TargetClothSimulation
     let expected_owner_vtable = base.saturating_add(ER_CLOTH_MODEL_VTABLE_RVA);
     let expected_inner_vtable = base.saturating_add(ER_CLOTH_INNER_VTABLE_RVA);
 
-    for (slot, owner) in CLOTH_INSTANCE_OWNERS.iter().enumerate() {
+    for (slot, owner) in unit_state.cloth_instance_owners.iter().enumerate() {
         let owner = owner.load(Ordering::Acquire);
         if owner == 0
             || target_cloth_input(slot, target_input).is_none()
@@ -3551,13 +3792,26 @@ fn record_immediate_child_transition(
     ),
     expected_ratio: f32,
 ) {
+    let unit_state = current_unit_state();
     let counts = immediate_child_transition_counts(before, after, expected_ratio);
-    CLOTH_IMMEDIATE_PROBE_TRANSITIONS.fetch_add(1, Ordering::Relaxed);
-    CLOTH_IMMEDIATE_CHILDREN_OBSERVED.fetch_add(counts.children_observed, Ordering::Relaxed);
-    CLOTH_IMMEDIATE_PARTICLE_MATCHES.fetch_add(counts.particle_matches, Ordering::Relaxed);
-    CLOTH_IMMEDIATE_TRANSFORM_MATCHES.fetch_add(counts.transform_matches, Ordering::Relaxed);
-    CLOTH_IMMEDIATE_BOTH_MATCHES.fetch_add(counts.both_matches, Ordering::Relaxed);
-    CLOTH_IMMEDIATE_UNREADABLE.fetch_add(counts.unreadable, Ordering::Relaxed);
+    unit_state
+        .cloth_immediate_probe_transitions
+        .fetch_add(1, Ordering::Relaxed);
+    unit_state
+        .cloth_immediate_children_observed
+        .fetch_add(counts.children_observed, Ordering::Relaxed);
+    unit_state
+        .cloth_immediate_particle_matches
+        .fetch_add(counts.particle_matches, Ordering::Relaxed);
+    unit_state
+        .cloth_immediate_transform_matches
+        .fetch_add(counts.transform_matches, Ordering::Relaxed);
+    unit_state
+        .cloth_immediate_both_matches
+        .fetch_add(counts.both_matches, Ordering::Relaxed);
+    unit_state
+        .cloth_immediate_unreadable
+        .fetch_add(counts.unreadable, Ordering::Relaxed);
 }
 
 #[inline(never)]
@@ -4741,10 +4995,13 @@ fn vector_length3(x: f32, y: f32, z: f32) -> f32 {
 }
 
 fn pose_importer_update_hook(registers: *mut Registers, original: usize) -> usize {
+    let unit_state = current_unit_state();
     let registers = unsafe { &*registers };
     let this = registers.rcx as usize;
-    let primary_before = TARGET_POSE_IMPORTER.load(Ordering::Acquire);
-    let cloth_before = TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire);
+    let primary_before = unit_state.target_pose_importer.load(Ordering::Acquire);
+    let cloth_before = unit_state
+        .target_cloth_pose_importer
+        .load(Ordering::Acquire);
     // A shared pointer is handled by the primary slot exactly once. A distinct
     // cloth pointer gets independent ratio state so transitions can be restored
     // without double-scaling either cache.
@@ -4762,38 +5019,45 @@ fn pose_importer_update_hook(registers: *mut Registers, original: usize) -> usiz
     let result = unsafe { original(this) };
 
     let current_target = if cloth_only_target {
-        TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire)
+        unit_state
+            .target_cloth_pose_importer
+            .load(Ordering::Acquire)
     } else {
-        TARGET_POSE_IMPORTER.load(Ordering::Acquire)
+        unit_state.target_pose_importer.load(Ordering::Acquire)
     };
-    if !is_target || this != current_target || !valid_scale(scale) {
+    if !is_target || this != current_target || !valid_scale(scale) || !unit_state.identity_current()
+    {
         return result;
     }
-    POSE_TARGET_CALLS.fetch_add(1, Ordering::Relaxed);
+    unit_state.pose_target_calls.fetch_add(1, Ordering::Relaxed);
     if cloth_only_target {
-        CLOTH_POSE_TARGET_CALLS.fetch_add(1, Ordering::Relaxed);
+        unit_state
+            .cloth_pose_target_calls
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     let materialized_after = read_u8(inner + POSE_MATERIALIZED_OFFSET);
     record_pose_gate(materialized_before, materialized_after);
 
-    if POSE_WRITE_LOCK.swap(true, Ordering::AcqRel) {
+    if unit_state.pose_write_lock.swap(true, Ordering::AcqRel) {
         return result;
     }
     let current_target = if cloth_only_target {
-        TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire)
+        unit_state
+            .target_cloth_pose_importer
+            .load(Ordering::Acquire)
     } else {
-        TARGET_POSE_IMPORTER.load(Ordering::Acquire)
+        unit_state.target_pose_importer.load(Ordering::Acquire)
     };
     if this != current_target {
-        POSE_WRITE_LOCK.store(false, Ordering::Release);
+        unit_state.pose_write_lock.store(false, Ordering::Release);
         return result;
     }
 
     let applied_scale_bits = if cloth_only_target {
-        &CLOTH_POSE_APPLIED_SCALE_BITS
+        &unit_state.cloth_pose_applied_scale_bits
     } else {
-        &POSE_APPLIED_SCALE_BITS
+        &unit_state.pose_applied_scale_bits
     };
     let previous_applied_scale = f32::from_bits(applied_scale_bits.load(Ordering::Acquire));
     match plan_pose_scale(
@@ -4808,30 +5072,35 @@ fn pose_importer_update_hook(registers: *mut Registers, original: usize) -> usiz
         PoseScaleAction::Scale(ratio) => match scale_pose_output(inner, ratio) {
             Some(count) => {
                 applied_scale_bits.store(scale.to_bits(), Ordering::Release);
-                POSE_TRANSFORMS_WRITTEN.fetch_add(count as u64, Ordering::Relaxed);
+                unit_state
+                    .pose_transforms_written
+                    .fetch_add(count as u64, Ordering::Relaxed);
                 if cloth_only_target {
-                    CLOTH_POSE_TRANSFORMS_WRITTEN.fetch_add(count as u64, Ordering::Relaxed);
+                    unit_state
+                        .cloth_pose_transforms_written
+                        .fetch_add(count as u64, Ordering::Relaxed);
                 }
             }
             None => {
-                REJECTED_OUTPUTS.fetch_add(1, Ordering::Relaxed);
+                unit_state.rejected_outputs.fetch_add(1, Ordering::Relaxed);
             }
         },
         PoseScaleAction::Reject => {
-            REJECTED_OUTPUTS.fetch_add(1, Ordering::Relaxed);
+            unit_state.rejected_outputs.fetch_add(1, Ordering::Relaxed);
         }
     }
-    POSE_WRITE_LOCK.store(false, Ordering::Release);
+    unit_state.pose_write_lock.store(false, Ordering::Release);
     result
 }
 
 fn record_pose_gate(before: Option<u8>, after: Option<u8>) {
+    let unit_state = current_unit_state();
     let counter = match (before, after) {
-        (Some(0), Some(0)) => &POSE_GATE_00,
-        (Some(0), Some(1)) => &POSE_GATE_01,
-        (Some(1), Some(0)) => &POSE_GATE_10,
-        (Some(1), Some(1)) => &POSE_GATE_11,
-        _ => &POSE_GATE_OTHER,
+        (Some(0), Some(0)) => &unit_state.pose_gate_00,
+        (Some(0), Some(1)) => &unit_state.pose_gate_01,
+        (Some(1), Some(0)) => &unit_state.pose_gate_10,
+        (Some(1), Some(1)) => &unit_state.pose_gate_11,
+        _ => &unit_state.pose_gate_other,
     };
     counter.fetch_add(1, Ordering::Relaxed);
 }
@@ -4853,6 +5122,7 @@ struct RenderScope {
 }
 
 fn render_scope(this: usize, scale: f32) -> Option<RenderScope> {
+    let unit_state = current_unit_state();
     if !HOOKS_READY.load(Ordering::Acquire)
         || current_scale().to_bits() != scale.to_bits()
         || !valid_active_scale(scale)
@@ -4866,32 +5136,34 @@ fn render_scope(this: usize, scale: f32) -> Option<RenderScope> {
     // B50CF0(node) resolves *node.holder; never call game code during selection.
     let holder = read_usize(this.checked_add(0x70)?)?;
     let input = read_usize(holder)?;
-    let anchor = TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire);
+    let anchor = unit_state
+        .target_cloth_pose_importer
+        .load(Ordering::Acquire);
     if input == 0
         || anchor == 0
         || input == anchor
-        || input == TARGET_POSE_IMPORTER.load(Ordering::Acquire)
+        || input == unit_state.target_pose_importer.load(Ordering::Acquire)
     {
         return None;
     }
     // Only search our bounded cached identities; no scene/equipment discovery.
     let slot = (0..CLOTH_INSTANCE_SLOTS).find(|&slot| {
-        CLOTH_INSTANCE_INPUTS[slot].load(Ordering::Acquire) == input
-            && CLOTH_INSTANCE_WAS_EQUIPMENT[slot].load(Ordering::Acquire)
+        unit_state.cloth_instance_inputs[slot].load(Ordering::Acquire) == input
+            && unit_state.cloth_instance_was_equipment[slot].load(Ordering::Acquire)
     })?;
-    let owner = CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire);
-    if CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].load(Ordering::Acquire) != scale.to_bits()
-        || CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].load(Ordering::Acquire)
+    let owner = unit_state.cloth_instance_owners[slot].load(Ordering::Acquire);
+    if unit_state.cloth_instance_applied_scale_bits[slot].load(Ordering::Acquire) != scale.to_bits()
+        || unit_state.cloth_instance_pending_scale_bits[slot].load(Ordering::Acquire)
             != NO_PENDING_CLOTH_SCALE_BITS
     {
         return None;
     }
-    let scope = TARGET_CLOTH_SCOPE.try_read().ok()?;
+    let scope = unit_state.target_cloth_scope.try_read().ok()?;
     let route = scope.find(owner, input)?;
     if scope.anchor != anchor
         || !scope.route_is_current(route, base, read_usize)
         || scope.routes.iter().filter(|r| r.input == input).count() != 1
-        || CLOTH_INSTANCE_CORES[slot].load(Ordering::Acquire) != route.core
+        || unit_state.cloth_instance_cores[slot].load(Ordering::Acquire) != route.core
     {
         return None;
     }
@@ -4920,7 +5192,7 @@ fn render_scope(this: usize, scale: f32) -> Option<RenderScope> {
         player: scope.player,
         assembly: scope.assembly,
         anchor,
-        generation: CLOTH_TOPOLOGY_GENERATION.load(Ordering::Acquire),
+        generation: unit_state.cloth_topology_generation.load(Ordering::Acquire),
         slot,
         metadata,
         source_count,
@@ -5012,6 +5284,7 @@ fn reconcile_render_output(
 }
 
 fn cloth_render_range_hook(registers: *mut Registers, original: usize) -> usize {
+    let unit_state = current_unit_state();
     let registers = unsafe { &*registers };
     let this = registers.rcx as usize;
     let output = registers.rdx as usize;
@@ -5038,7 +5311,7 @@ fn cloth_render_range_hook(registers: *mut Registers, original: usize) -> usize 
     };
     let timer = std::time::Instant::now();
     let post_queries_before = crate::memory_query::query_count();
-    RENDER_CALLS.fetch_add(1, Ordering::Relaxed);
+    unit_state.render_calls.fetch_add(1, Ordering::Relaxed);
     let changed = if result <= requested as usize {
         crate::memory_query::scoped(|| {
             reconcile_render_output(this, output, result, start as usize, scale, before)
@@ -5048,17 +5321,19 @@ fn cloth_render_range_hook(registers: *mut Registers, original: usize) -> usize 
     };
     match changed {
         Some(rows) => {
-            RENDER_ROWS.fetch_add(rows as u64, Ordering::Relaxed);
+            unit_state
+                .render_rows
+                .fetch_add(rows as u64, Ordering::Relaxed);
         }
         None => {
-            RENDER_REJECTED.fetch_add(1, Ordering::Relaxed);
+            unit_state.render_rejected.fetch_add(1, Ordering::Relaxed);
         }
     }
-    RENDER_MAX_US.fetch_max(
+    unit_state.render_max_us.fetch_max(
         (pre_time + timer.elapsed()).as_micros() as u64,
         Ordering::Relaxed,
     );
-    RENDER_MAX_QUERIES.fetch_max(
+    unit_state.render_max_queries.fetch_max(
         pre_queries + crate::memory_query::query_count() - post_queries_before,
         Ordering::Relaxed,
     );
@@ -5066,16 +5341,19 @@ fn cloth_render_range_hook(registers: *mut Registers, original: usize) -> usize 
 }
 
 pub fn cloth_mesh_frame_counters() -> [u64; 9] {
+    let unit_state = current_unit_state();
     [
-        CLOTH_MESH_FRAME_SEEN.load(Ordering::Relaxed),
-        CLOTH_MESH_FRAME_CALLS.load(Ordering::Relaxed),
-        CLOTH_MESH_FRAMES_WRITTEN.load(Ordering::Relaxed),
-        CLOTH_MESH_FRAME_MAX_US.load(Ordering::Relaxed),
-        CLOTH_MESH_FRAME_MAX_QUERIES.load(Ordering::Relaxed),
-        CLOTH_MESH_NORMAL_ROWS.load(Ordering::Relaxed),
-        CLOTH_MESH_PN_MAX_US.load(Ordering::Relaxed),
-        CLOTH_MESH_AREA_CALLS.load(Ordering::Relaxed),
-        CLOTH_MESH_AREA_FRAMES.load(Ordering::Relaxed),
+        unit_state.cloth_mesh_frame_seen.load(Ordering::Relaxed),
+        unit_state.cloth_mesh_frame_calls.load(Ordering::Relaxed),
+        unit_state.cloth_mesh_frames_written.load(Ordering::Relaxed),
+        unit_state.cloth_mesh_frame_max_us.load(Ordering::Relaxed),
+        unit_state
+            .cloth_mesh_frame_max_queries
+            .load(Ordering::Relaxed),
+        unit_state.cloth_mesh_normal_rows.load(Ordering::Relaxed),
+        unit_state.cloth_mesh_pn_max_us.load(Ordering::Relaxed),
+        unit_state.cloth_mesh_area_calls.load(Ordering::Relaxed),
+        unit_state.cloth_mesh_area_frames.load(Ordering::Relaxed),
     ]
 }
 
@@ -5113,10 +5391,11 @@ fn validate_skin_normal_runtime(base: usize) -> bool {
 }
 
 pub fn cloth_skin_normal_counters() -> [u64; 3] {
+    let unit_state = current_unit_state();
     [
-        CLOTH_SKIN_NORMAL_CALLS.load(Ordering::Relaxed),
-        CLOTH_SKIN_NORMAL_ROWS.load(Ordering::Relaxed),
-        CLOTH_SKIN_NORMAL_MAX_US.load(Ordering::Relaxed),
+        unit_state.cloth_skin_normal_calls.load(Ordering::Relaxed),
+        unit_state.cloth_skin_normal_rows.load(Ordering::Relaxed),
+        unit_state.cloth_skin_normal_max_us.load(Ordering::Relaxed),
     ]
 }
 
@@ -5163,6 +5442,7 @@ fn skin_normal_call_traced(
     context: usize,
     trace: &mut SkinNormalTrace,
 ) -> Option<SkinNormalCall> {
+    let unit_state = current_unit_state();
     let base = MODULE_BASE.load(Ordering::Acquire);
     let scale = current_scale();
     trace.step("hooks_ready", 0, [0; 4], 1);
@@ -5185,12 +5465,14 @@ fn skin_normal_call_traced(
     let root = read_usize(context.checked_add(0x10)?)?;
     let generation = cloth_topology_generation();
     trace.step("scope_lock", 0, [root, 0, 0, 0], 0);
-    let scope = *TARGET_CLOTH_SCOPE.try_read().ok()?;
+    let scope = *unit_state.target_cloth_scope.try_read().ok()?;
     trace.step("scope_anchor", 0, [scope.anchor, root, 0, 0], 0);
     if scope.anchor == 0 {
         return None;
     }
-    let anchor = TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire);
+    let anchor = unit_state
+        .target_cloth_pose_importer
+        .load(Ordering::Acquire);
     trace.expected = anchor;
     if scope.anchor != anchor {
         return None;
@@ -5201,18 +5483,20 @@ fn skin_normal_call_traced(
     let mut route_skips = [0usize; 4];
     for route in scope.routes.iter().copied().filter(|r| r.owner != 0) {
         let Some(slot) = (0..CLOTH_INSTANCE_SLOTS).find(|&s| {
-            CLOTH_INSTANCE_OWNERS[s].load(Ordering::Acquire) == route.owner
-                && CLOTH_INSTANCE_INPUTS[s].load(Ordering::Acquire) == route.input
-                && CLOTH_INSTANCE_CORES[s].load(Ordering::Acquire) == route.core
+            unit_state.cloth_instance_owners[s].load(Ordering::Acquire) == route.owner
+                && unit_state.cloth_instance_inputs[s].load(Ordering::Acquire) == route.input
+                && unit_state.cloth_instance_cores[s].load(Ordering::Acquire) == route.core
         }) else {
             route_skips[0] += 1;
             continue;
         };
-        if CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].load(Ordering::Acquire) != scale.to_bits() {
+        if unit_state.cloth_instance_applied_scale_bits[slot].load(Ordering::Acquire)
+            != scale.to_bits()
+        {
             route_skips[1] += 1;
             continue;
         }
-        if CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].load(Ordering::Acquire)
+        if unit_state.cloth_instance_pending_scale_bits[slot].load(Ordering::Acquire)
             != NO_PENDING_CLOTH_SCALE_BITS
         {
             route_skips[2] += 1;
@@ -5559,6 +5843,7 @@ fn skin_basis_is_single_axis_contraction(matrix: &[f32; 16], scale: f32) -> bool
 }
 
 fn cloth_skin_normal_hook(registers: *mut Registers, original: usize) -> usize {
+    let unit_state = current_unit_state();
     let timer = std::time::Instant::now();
     let r = unsafe { &*registers };
     let (op, context) = (r.rcx as usize, r.rdx as usize);
@@ -5608,11 +5893,15 @@ fn cloth_skin_normal_hook(registers: *mut Registers, original: usize) -> usize {
                 [span.data, span.count, span.stride, written],
                 marker.scale_bits as usize,
             );
-            CLOTH_SKIN_NORMAL_CALLS.fetch_add(1, Ordering::Relaxed);
-            CLOTH_SKIN_NORMAL_ROWS.fetch_add(written as u64, Ordering::Relaxed);
+            unit_state
+                .cloth_skin_normal_calls
+                .fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .cloth_skin_normal_rows
+                .fetch_add(written as u64, Ordering::Relaxed);
             Some(written)
         });
-        CLOTH_SKIN_NORMAL_MAX_US.fetch_max(
+        unit_state.cloth_skin_normal_max_us.fetch_max(
             (pre_time + post_timer.elapsed()).as_micros() as u64,
             Ordering::Relaxed,
         );
@@ -5633,6 +5922,7 @@ fn cloth_skin_normal_hook(registers: *mut Registers, original: usize) -> usize {
 #[cfg(test)]
 #[test]
 fn skin_normal_hook_fresh_output_scope_and_lifecycle_regression() {
+    let unit_state = current_unit_state();
     let _lock = MODULE_TEST_LOCK.lock().unwrap();
     clear_target();
     let image = 0x140000000usize;
@@ -5705,15 +5995,21 @@ fn skin_normal_hook_fresh_output_scope_and_lifecycle_regression() {
     }
     MODULE_BASE.store(image, Ordering::Release);
     HOOKS_READY.store(true, Ordering::Release);
-    TARGET_CLOTH_POSE_IMPORTER.store(heap + 0x2280, Ordering::Release);
-    TARGET_POSE_IMPORTER.store(heap + 0x2280, Ordering::Release);
+    unit_state
+        .target_cloth_pose_importer
+        .store(heap + 0x2280, Ordering::Release);
+    unit_state
+        .target_pose_importer
+        .store(heap + 0x2280, Ordering::Release);
     refresh_owned_cloth_inputs(heap + 0x100, heap + 0x2280);
     let slot = (0..CLOTH_INSTANCE_SLOTS)
-        .find(|&s| CLOTH_INSTANCE_INPUTS[s].load(Ordering::Acquire) == heap + 0x1200)
+        .find(|&s| unit_state.cloth_instance_inputs[s].load(Ordering::Acquire) == heap + 0x1200)
         .unwrap();
-    CLOTH_INSTANCE_CORES[slot].store(heap + 0x1000, Ordering::Release);
-    CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(NO_PENDING_CLOTH_SCALE_BITS, Ordering::Release);
+    unit_state.cloth_instance_cores[slot].store(heap + 0x1000, Ordering::Release);
+    unit_state.cloth_instance_pending_scale_bits[slot]
+        .store(NO_PENDING_CLOTH_SCALE_BITS, Ordering::Release);
     unsafe extern "C" fn native(op: usize, _ctx: usize) -> usize {
+        let unit_state = current_unit_state();
         let heap = op - 0x3200;
         unsafe {
             let calls = (heap + 0x4000) as *mut u64;
@@ -5729,7 +6025,9 @@ fn skin_normal_hook_fresh_output_scope_and_lifecycle_regression() {
                 ((heap + 0x3000 + i * 16) as *mut [u32; 4]).write_unaligned([1, 2, 3, 0x7FC00019]);
             }
             if ((heap + 0x4008) as *const u8).read() == 1 {
-                CLOTH_TOPOLOGY_GENERATION.fetch_add(1, Ordering::AcqRel);
+                unit_state
+                    .cloth_topology_generation
+                    .fetch_add(1, Ordering::AcqRel);
             }
             if ((heap + 0x4008) as *const u8).read() == 2 {
                 ((heap + 0x2740) as *mut usize).write_unaligned(heap + 0x3180);
@@ -5742,8 +6040,11 @@ fn skin_normal_hook_fresh_output_scope_and_lifecycle_regression() {
     r.rdx = (heap + 0x2300) as u64;
     let invoke = |r: &mut Registers| cloth_skin_normal_hook(r, native as *const () as usize);
     for scale in [0.5f32, 0.5, 3., 1., 0.5] {
-        TARGET_SCALE_BITS.store(scale.to_bits(), Ordering::Release);
-        CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].store(scale.to_bits(), Ordering::Release);
+        unit_state
+            .target_scale_bits
+            .store(scale.to_bits(), Ordering::Release);
+        unit_state.cloth_instance_applied_scale_bits[slot]
+            .store(scale.to_bits(), Ordering::Release);
         let mut m = unit;
         for j in [0, 5, 10] {
             m[j] = scale;
@@ -5890,10 +6191,11 @@ fn skin_normal_hook_fresh_output_scope_and_lifecycle_regression() {
         half[j] = 0.5;
     }
     unsafe { ((heap + 0x2A00) as *mut [f32; 16]).write_unaligned(half) };
-    CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(0.5f32.to_bits(), Ordering::Release);
+    unit_state.cloth_instance_pending_scale_bits[slot].store(0.5f32.to_bits(), Ordering::Release);
     assert_eq!(invoke(&mut r), 0x1234);
     assert_eq!(read_f32(heap + 0x3100), Some(0.15));
-    CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(NO_PENDING_CLOTH_SCALE_BITS, Ordering::Release);
+    unit_state.cloth_instance_pending_scale_bits[slot]
+        .store(NO_PENDING_CLOTH_SCALE_BITS, Ordering::Release);
     byte(0x4008, 2);
     assert_eq!(invoke(&mut r), 0x1234);
     assert_eq!(read_f32(heap + 0x3100), Some(0.15));
@@ -5986,6 +6288,7 @@ fn skin_normal_hook_fresh_output_scope_and_lifecycle_regression() {
     put(0x4218, heap + 0x4300);
     // Group0, bone mapping0; a unique input entry rebuilt by the owned core.
     unsafe extern "C" fn contracted_native(op: usize, _ctx: usize) -> usize {
+        let unit_state = current_unit_state();
         let heap = op - 0x3200;
         let m = unsafe { ((heap + 0x2A00) as *const [f32; 16]).read_unaligned() };
         for i in 0..3 {
@@ -6004,7 +6307,9 @@ fn skin_normal_hook_fresh_output_scope_and_lifecycle_regression() {
         }
         match unsafe { ((heap + 0x4008) as *const u8).read() } {
             1 => {
-                CLOTH_TOPOLOGY_GENERATION.fetch_add(1, Ordering::AcqRel);
+                unit_state
+                    .cloth_topology_generation
+                    .fetch_add(1, Ordering::AcqRel);
             }
             2 => unsafe { ((heap + 0x2740) as *mut usize).write_unaligned(heap + 0x3180) },
             3 => unsafe { ((heap + 0x4100) as *mut usize).write_unaligned(0) },
@@ -6019,8 +6324,11 @@ fn skin_normal_hook_fresh_output_scope_and_lifecycle_regression() {
             .sum::<f32>()
     });
     for scale in [0.5f32, 3., 0.5] {
-        TARGET_SCALE_BITS.store(scale.to_bits(), Ordering::Release);
-        CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].store(scale.to_bits(), Ordering::Release);
+        unit_state
+            .target_scale_bits
+            .store(scale.to_bits(), Ordering::Release);
+        unit_state.cloth_instance_applied_scale_bits[slot]
+            .store(scale.to_bits(), Ordering::Release);
         let mut source = captured;
         let mut core = unit;
         for j in [0, 5, 10] {
@@ -6106,9 +6414,10 @@ fn skin_normal_hook_fresh_output_scope_and_lifecycle_regression() {
     for at in [0x3250, 0x3260, 0x2920] {
         put(at, 1);
     }
-    CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(0.5f32.to_bits(), Ordering::Release);
+    unit_state.cloth_instance_pending_scale_bits[slot].store(0.5f32.to_bits(), Ordering::Release);
     rejected();
-    CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(NO_PENDING_CLOTH_SCALE_BITS, Ordering::Release);
+    unit_state.cloth_instance_pending_scale_bits[slot]
+        .store(NO_PENDING_CLOTH_SCALE_BITS, Ordering::Release);
     for flag in [1, 2, 3] {
         byte(0x4008, flag);
         rejected();
@@ -6370,6 +6679,7 @@ fn packed_normal_span_traced(
 }
 
 fn cloth_mesh_pn_hook(registers: *mut Registers, original: usize) -> usize {
+    let unit_state = current_unit_state();
     let timer = std::time::Instant::now();
     let r = unsafe { &*registers };
     let (op, local, input, output) = (r.rcx as usize, r.rdx as usize, r.r8 as usize, r.r9 as usize);
@@ -6403,15 +6713,18 @@ fn cloth_mesh_pn_hook(registers: *mut Registers, original: usize) -> usize {
         let _ = crate::memory_query::scoped(|| {
             let (route, slot, anchor, generation) = call.mark?;
             let span = call.span?;
-            let scope = TARGET_CLOTH_SCOPE.try_read().ok()?;
+            let scope = unit_state.target_cloth_scope.try_read().ok()?;
             if current_scale().to_bits() != call.scale.to_bits()
                 || scope.anchor != anchor
-                || CLOTH_INSTANCE_CORES[slot].load(Ordering::Acquire) != route.core
-                || TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire) != anchor
-                || CLOTH_TOPOLOGY_GENERATION.load(Ordering::Acquire) != generation
-                || CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].load(Ordering::Acquire)
+                || unit_state.cloth_instance_cores[slot].load(Ordering::Acquire) != route.core
+                || unit_state
+                    .target_cloth_pose_importer
+                    .load(Ordering::Acquire)
+                    != anchor
+                || unit_state.cloth_topology_generation.load(Ordering::Acquire) != generation
+                || unit_state.cloth_instance_applied_scale_bits[slot].load(Ordering::Acquire)
                     != call.scale.to_bits()
-                || CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].load(Ordering::Acquire)
+                || unit_state.cloth_instance_pending_scale_bits[slot].load(Ordering::Acquire)
                     != NO_PENDING_CLOTH_SCALE_BITS
                 || !scope.route_is_current(route, MODULE_BASE.load(Ordering::Acquire), read_usize)
                 || mesh_normal_span(op, output) != Some(span)
@@ -6427,7 +6740,9 @@ fn cloth_mesh_pn_hook(registers: *mut Registers, original: usize) -> usize {
                 span.stride,
                 call.scale,
             )?;
-            CLOTH_MESH_NORMAL_ROWS.fetch_add(n as u64, Ordering::Relaxed);
+            unit_state
+                .cloth_mesh_normal_rows
+                .fetch_add(n as u64, Ordering::Relaxed);
             // BEGIN249-MESH-OUTPUT-OBSERVER
             if crate::ENABLE_SYNC_DIAGNOSTIC {
                 crate::cloth_diagnostic::observe_mesh_output(op, output, span.data);
@@ -6437,7 +6752,7 @@ fn cloth_mesh_pn_hook(registers: *mut Registers, original: usize) -> usize {
         });
     }
     if call.is_some() {
-        CLOTH_MESH_PN_MAX_US.fetch_max(
+        unit_state.cloth_mesh_pn_max_us.fetch_max(
             (pre_time + post_timer.elapsed()).as_micros() as u64,
             Ordering::Relaxed,
         );
@@ -6446,13 +6761,16 @@ fn cloth_mesh_pn_hook(registers: *mut Registers, original: usize) -> usize {
 }
 
 fn cloth_mesh_frame_hook(registers: *mut Registers) {
+    let unit_state = current_unit_state();
     if !HOOKS_READY.load(Ordering::Acquire) || !valid_active_scale(current_scale()) {
         return;
     }
     let registers = unsafe { &*registers };
     let start = std::time::Instant::now();
     let queries = crate::memory_query::query_count();
-    CLOTH_MESH_FRAME_SEEN.fetch_add(1, Ordering::Relaxed);
+    unit_state
+        .cloth_mesh_frame_seen
+        .fetch_add(1, Ordering::Relaxed);
     let _ = crate::memory_query::scoped(|| {
         correct_cloth_mesh_frames(
             registers.rbx as usize,
@@ -6461,8 +6779,10 @@ fn cloth_mesh_frame_hook(registers: *mut Registers) {
             registers.rbp as usize,
         )
     });
-    CLOTH_MESH_FRAME_MAX_US.fetch_max(start.elapsed().as_micros() as u64, Ordering::Relaxed);
-    CLOTH_MESH_FRAME_MAX_QUERIES.fetch_max(
+    unit_state
+        .cloth_mesh_frame_max_us
+        .fetch_max(start.elapsed().as_micros() as u64, Ordering::Relaxed);
+    unit_state.cloth_mesh_frame_max_queries.fetch_max(
         crate::memory_query::query_count() - queries,
         Ordering::Relaxed,
     );
@@ -6474,6 +6794,7 @@ fn correct_cloth_mesh_frames(
     array: usize,
     output_inverse: usize,
 ) -> Option<usize> {
+    let unit_state = current_unit_state();
     let scale = current_scale();
     let mode = read_u32(op.checked_add(0x50)?)?;
     if !valid_active_scale(scale) || mode > 1 {
@@ -6524,9 +6845,11 @@ fn correct_cloth_mesh_frames(
         return None;
     }
     let base = MODULE_BASE.load(Ordering::Acquire);
-    let anchor = TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire);
-    let generation = CLOTH_TOPOLOGY_GENERATION.load(Ordering::Acquire);
-    let scope = TARGET_CLOTH_SCOPE.try_read().ok()?;
+    let anchor = unit_state
+        .target_cloth_pose_importer
+        .load(Ordering::Acquire);
+    let generation = unit_state.cloth_topology_generation.load(Ordering::Acquire);
+    let scope = unit_state.target_cloth_scope.try_read().ok()?;
     if anchor == 0 || scope.anchor != anchor {
         return None;
     }
@@ -6534,14 +6857,15 @@ fn correct_cloth_mesh_frames(
     let mut visited = 0usize;
     for route in scope.routes.iter().copied().filter(|r| r.owner != 0) {
         let Some(slot) = (0..CLOTH_INSTANCE_SLOTS).find(|&s| {
-            CLOTH_INSTANCE_OWNERS[s].load(Ordering::Acquire) == route.owner
-                && CLOTH_INSTANCE_INPUTS[s].load(Ordering::Acquire) == route.input
+            unit_state.cloth_instance_owners[s].load(Ordering::Acquire) == route.owner
+                && unit_state.cloth_instance_inputs[s].load(Ordering::Acquire) == route.input
         }) else {
             continue;
         };
-        if CLOTH_INSTANCE_CORES[slot].load(Ordering::Acquire) != route.core
-            || CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].load(Ordering::Acquire) != scale.to_bits()
-            || CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].load(Ordering::Acquire)
+        if unit_state.cloth_instance_cores[slot].load(Ordering::Acquire) != route.core
+            || unit_state.cloth_instance_applied_scale_bits[slot].load(Ordering::Acquire)
+                != scale.to_bits()
+            || unit_state.cloth_instance_pending_scale_bits[slot].load(Ordering::Acquire)
                 != NO_PENDING_CLOTH_SCALE_BITS
             || !scope.route_is_current(route, base, read_usize)
         {
@@ -6606,11 +6930,15 @@ fn correct_cloth_mesh_frames(
         || !disjoint(buffer, 0x118)?
         || !disjoint(read_usize(buffer.checked_add(0x30)?)?, triangle_count * 6)?
         || current_scale().to_bits() != scale.to_bits()
-        || TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire) != anchor
-        || CLOTH_TOPOLOGY_GENERATION.load(Ordering::Acquire) != generation
-        || CLOTH_INSTANCE_CORES[slot].load(Ordering::Acquire) != route.core
-        || CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].load(Ordering::Acquire) != scale.to_bits()
-        || CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].load(Ordering::Acquire)
+        || unit_state
+            .target_cloth_pose_importer
+            .load(Ordering::Acquire)
+            != anchor
+        || unit_state.cloth_topology_generation.load(Ordering::Acquire) != generation
+        || unit_state.cloth_instance_cores[slot].load(Ordering::Acquire) != route.core
+        || unit_state.cloth_instance_applied_scale_bits[slot].load(Ordering::Acquire)
+            != scale.to_bits()
+        || unit_state.cloth_instance_pending_scale_bits[slot].load(Ordering::Acquire)
             != NO_PENDING_CLOTH_SCALE_BITS
         || !scope.route_is_current(route, base, read_usize)
     {
@@ -6660,21 +6988,30 @@ fn correct_cloth_mesh_frames(
         }
         // END249-MESH-FRAME-OBSERVER
     }
-    CLOTH_MESH_FRAME_CALLS.fetch_add(1, Ordering::Relaxed);
-    CLOTH_MESH_FRAMES_WRITTEN.fetch_add(written as u64, Ordering::Relaxed);
+    unit_state
+        .cloth_mesh_frame_calls
+        .fetch_add(1, Ordering::Relaxed);
+    unit_state
+        .cloth_mesh_frames_written
+        .fetch_add(written as u64, Ordering::Relaxed);
     if mode == 1 {
-        CLOTH_MESH_AREA_CALLS.fetch_add(1, Ordering::Relaxed);
-        CLOTH_MESH_AREA_FRAMES.fetch_add(written as u64, Ordering::Relaxed);
+        unit_state
+            .cloth_mesh_area_calls
+            .fetch_add(1, Ordering::Relaxed);
+        unit_state
+            .cloth_mesh_area_frames
+            .fetch_add(written as u64, Ordering::Relaxed);
     }
     Some(written)
 }
 
 fn anim_skeleton_get_affine_hook(registers: *mut Registers, original: usize) -> usize {
+    let unit_state = current_unit_state();
     let registers = unsafe { &*registers };
     let this = registers.rcx as usize;
     let output = registers.rdx as usize;
     let index = registers.r8 as u32;
-    let target_before = TARGET_ANIM_SKELETON.load(Ordering::Acquire);
+    let target_before = unit_state.target_anim_skeleton.load(Ordering::Acquire);
     let scale = current_scale();
     let uses_fallback = if this == target_before && valid_active_scale(scale) {
         affine_index_uses_fallback(this, index)
@@ -6686,31 +7023,36 @@ fn anim_skeleton_get_affine_hook(registers: *mut Registers, original: usize) -> 
 
     if result == 0
         || this != target_before
-        || this != TARGET_ANIM_SKELETON.load(Ordering::Acquire)
+        || this != unit_state.target_anim_skeleton.load(Ordering::Acquire)
         || !valid_active_scale(scale)
     {
         return result;
     }
-    AFFINE_SINGLE_TARGET_CALLS.fetch_add(1, Ordering::Relaxed);
+    unit_state
+        .affine_single_target_calls
+        .fetch_add(1, Ordering::Relaxed);
     match uses_fallback {
         Some(false) => {}
         Some(true) if scale_affine_output(output, 1, scale) => {
-            AFFINE_SINGLE_MATRICES_WRITTEN.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .affine_single_matrices_written
+                .fetch_add(1, Ordering::Relaxed);
         }
         Some(true) | None => {
-            REJECTED_OUTPUTS.fetch_add(1, Ordering::Relaxed);
+            unit_state.rejected_outputs.fetch_add(1, Ordering::Relaxed);
         }
     }
     result
 }
 
 fn anim_skeleton_get_affine_range_item_commit_hook(registers: *mut Registers) {
+    let unit_state = current_unit_state();
     let registers = unsafe { &*registers };
     let this = registers.rbp as usize;
-    let target_before = TARGET_ANIM_SKELETON.load(Ordering::Acquire);
+    let target_before = unit_state.target_anim_skeleton.load(Ordering::Acquire);
     let scale = current_scale();
     if this != target_before
-        || this != TARGET_ANIM_SKELETON.load(Ordering::Acquire)
+        || this != unit_state.target_anim_skeleton.load(Ordering::Acquire)
         || !valid_active_scale(scale)
     {
         return;
@@ -6725,33 +7067,48 @@ fn anim_skeleton_get_affine_range_item_commit_hook(registers: *mut Registers) {
     match action {
         AffineRangeFallbackAction::MappedPose => {}
         AffineRangeFallbackAction::Identity => {
-            AFFINE_RANGE_TARGET_CALLS.fetch_add(1, Ordering::Relaxed);
-            AFFINE_RANGE_PROVIDER_IDENTITIES.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .affine_range_target_calls
+                .fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .affine_range_provider_identities
+                .fetch_add(1, Ordering::Relaxed);
         }
         AffineRangeFallbackAction::ProviderFailed => {
-            AFFINE_RANGE_TARGET_CALLS.fetch_add(1, Ordering::Relaxed);
-            AFFINE_RANGE_PROVIDER_FAILURES.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .affine_range_target_calls
+                .fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .affine_range_provider_failures
+                .fetch_add(1, Ordering::Relaxed);
         }
         AffineRangeFallbackAction::Scale => {
-            AFFINE_RANGE_TARGET_CALLS.fetch_add(1, Ordering::Relaxed);
-            AFFINE_RANGE_PROVIDER_SUCCESSES.fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .affine_range_target_calls
+                .fetch_add(1, Ordering::Relaxed);
+            unit_state
+                .affine_range_provider_successes
+                .fetch_add(1, Ordering::Relaxed);
             if scale_affine_output(registers.rdi as usize, 1, scale) {
-                AFFINE_RANGE_MATRICES_WRITTEN.fetch_add(1, Ordering::Relaxed);
+                unit_state
+                    .affine_range_matrices_written
+                    .fetch_add(1, Ordering::Relaxed);
             } else {
-                REJECTED_OUTPUTS.fetch_add(1, Ordering::Relaxed);
+                unit_state.rejected_outputs.fetch_add(1, Ordering::Relaxed);
             }
         }
         AffineRangeFallbackAction::Reject => {
-            REJECTED_OUTPUTS.fetch_add(1, Ordering::Relaxed);
+            unit_state.rejected_outputs.fetch_add(1, Ordering::Relaxed);
         }
     }
 }
 
 fn anim_skeleton_get_hook(registers: *mut Registers, original: usize) -> usize {
+    let unit_state = current_unit_state();
     let registers = unsafe { &*registers };
     let this = registers.rcx as usize;
     let output = registers.rdx as usize;
-    let target_before = TARGET_ANIM_SKELETON.load(Ordering::Acquire);
+    let target_before = unit_state.target_anim_skeleton.load(Ordering::Acquire);
     let scale = current_scale();
     let caller = caller_from_stack(registers.rsp as usize);
     let arg8 = registers.r8 as u32;
@@ -6764,27 +7121,32 @@ fn anim_skeleton_get_hook(registers: *mut Registers, original: usize) -> usize {
 
     if result == 0
         || this != target_before
-        || this != TARGET_ANIM_SKELETON.load(Ordering::Acquire)
+        || this != unit_state.target_anim_skeleton.load(Ordering::Acquire)
         || !valid_active_scale(scale)
     {
         return result;
     }
-    SINGLE_TARGET_CALLS.fetch_add(1, Ordering::Relaxed);
+    unit_state
+        .single_target_calls
+        .fetch_add(1, Ordering::Relaxed);
     if scale_matrix_output(output, 1, scale) {
-        SINGLE_MATRICES_WRITTEN.fetch_add(1, Ordering::Relaxed);
+        unit_state
+            .single_matrices_written
+            .fetch_add(1, Ordering::Relaxed);
     } else {
-        REJECTED_OUTPUTS.fetch_add(1, Ordering::Relaxed);
+        unit_state.rejected_outputs.fetch_add(1, Ordering::Relaxed);
     }
     result
 }
 
 fn anim_skeleton_get_range_hook(registers: *mut Registers, original: usize) -> usize {
+    let unit_state = current_unit_state();
     let registers = unsafe { &*registers };
     let this = registers.rcx as usize;
     let output = registers.rdx as usize;
     let requested = registers.r8 as u32;
     let start = registers.r9 as u32;
-    let target_before = TARGET_ANIM_SKELETON.load(Ordering::Acquire);
+    let target_before = unit_state.target_anim_skeleton.load(Ordering::Acquire);
     let scale = current_scale();
     let caller = caller_from_stack(registers.rsp as usize);
     let original: unsafe extern "C" fn(usize, usize, u32, u32) -> usize =
@@ -6804,17 +7166,21 @@ fn anim_skeleton_get_range_hook(registers: *mut Registers, original: usize) -> u
 
     if result == 0
         || this != target_before
-        || this != TARGET_ANIM_SKELETON.load(Ordering::Acquire)
+        || this != unit_state.target_anim_skeleton.load(Ordering::Acquire)
         || !valid_active_scale(scale)
     {
         return result;
     }
-    RANGE_TARGET_CALLS.fetch_add(1, Ordering::Relaxed);
+    unit_state
+        .range_target_calls
+        .fetch_add(1, Ordering::Relaxed);
     let count = result.min(requested as usize);
     if count <= MAX_OUTPUTS_PER_CALL && scale_matrix_output(output, count, scale) {
-        RANGE_MATRICES_WRITTEN.fetch_add(count as u64, Ordering::Relaxed);
+        unit_state
+            .range_matrices_written
+            .fetch_add(count as u64, Ordering::Relaxed);
     } else {
-        REJECTED_OUTPUTS.fetch_add(1, Ordering::Relaxed);
+        unit_state.rejected_outputs.fetch_add(1, Ordering::Relaxed);
     }
     result
 }
@@ -6863,6 +7229,7 @@ fn record_matrix_candidate(
     arg8: u32,
     arg9: u32,
 ) {
+    let unit_state = current_unit_state();
     let module_base = MODULE_BASE.load(Ordering::Acquire);
     let Some(caller_rva) = module_relative_rva(module_base, caller) else {
         return;
@@ -6870,48 +7237,49 @@ fn record_matrix_candidate(
     let key = matrix_candidate_key(kind, caller_rva);
 
     for slot in 0..MATRIX_CANDIDATE_SLOTS {
-        let existing_key = MATRIX_CANDIDATE_KEYS[slot].load(Ordering::Acquire);
+        let existing_key = unit_state.matrix_candidate_keys[slot].load(Ordering::Acquire);
         if existing_key == key {
-            if MATRIX_CANDIDATE_KINDS[slot].load(Ordering::Relaxed) == kind
-                && MATRIX_CANDIDATE_CALLER_RVAS[slot].load(Ordering::Relaxed) == caller_rva
+            if unit_state.matrix_candidate_kinds[slot].load(Ordering::Relaxed) == kind
+                && unit_state.matrix_candidate_caller_rvas[slot].load(Ordering::Relaxed)
+                    == caller_rva
             {
-                MATRIX_CANDIDATE_LAST_THIS[slot].store(this, Ordering::Relaxed);
-                MATRIX_CANDIDATE_OUTPUTS[slot].store(output, Ordering::Relaxed);
-                MATRIX_CANDIDATE_ARG8[slot].store(arg8, Ordering::Relaxed);
-                MATRIX_CANDIDATE_ARG9[slot].store(arg9, Ordering::Relaxed);
-                MATRIX_CANDIDATE_HITS[slot].fetch_add(1, Ordering::Release);
+                unit_state.matrix_candidate_last_this[slot].store(this, Ordering::Relaxed);
+                unit_state.matrix_candidate_outputs[slot].store(output, Ordering::Relaxed);
+                unit_state.matrix_candidate_arg8[slot].store(arg8, Ordering::Relaxed);
+                unit_state.matrix_candidate_arg9[slot].store(arg9, Ordering::Relaxed);
+                unit_state.matrix_candidate_hits[slot].fetch_add(1, Ordering::Release);
                 return;
             }
             continue;
         }
         if existing_key != 0
-            || MATRIX_CANDIDATE_KEYS[slot]
+            || unit_state.matrix_candidate_keys[slot]
                 .compare_exchange(0, key, Ordering::AcqRel, Ordering::Acquire)
                 .is_err()
         {
             continue;
         }
 
-        MATRIX_CANDIDATE_KINDS[slot].store(kind, Ordering::Relaxed);
-        MATRIX_CANDIDATE_CALLER_RVAS[slot].store(caller_rva, Ordering::Relaxed);
-        MATRIX_CANDIDATE_FIRST_THIS[slot].store(this, Ordering::Relaxed);
-        MATRIX_CANDIDATE_LAST_THIS[slot].store(this, Ordering::Relaxed);
-        MATRIX_CANDIDATE_OUTPUTS[slot].store(output, Ordering::Relaxed);
-        MATRIX_CANDIDATE_ARG8[slot].store(arg8, Ordering::Relaxed);
-        MATRIX_CANDIDATE_ARG9[slot].store(arg9, Ordering::Relaxed);
-        MATRIX_CANDIDATE_QWORD_48[slot].store(
+        unit_state.matrix_candidate_kinds[slot].store(kind, Ordering::Relaxed);
+        unit_state.matrix_candidate_caller_rvas[slot].store(caller_rva, Ordering::Relaxed);
+        unit_state.matrix_candidate_first_this[slot].store(this, Ordering::Relaxed);
+        unit_state.matrix_candidate_last_this[slot].store(this, Ordering::Relaxed);
+        unit_state.matrix_candidate_outputs[slot].store(output, Ordering::Relaxed);
+        unit_state.matrix_candidate_arg8[slot].store(arg8, Ordering::Relaxed);
+        unit_state.matrix_candidate_arg9[slot].store(arg9, Ordering::Relaxed);
+        unit_state.matrix_candidate_qword_48[slot].store(
             read_usize(this.saturating_add(0x48)).unwrap_or(0),
             Ordering::Relaxed,
         );
-        MATRIX_CANDIDATE_QWORD_68[slot].store(
+        unit_state.matrix_candidate_qword_68[slot].store(
             read_usize(this.saturating_add(0x68)).unwrap_or(0),
             Ordering::Relaxed,
         );
-        MATRIX_CANDIDATE_QWORD_88[slot].store(
+        unit_state.matrix_candidate_qword_88[slot].store(
             read_usize(this.saturating_add(0x88)).unwrap_or(0),
             Ordering::Relaxed,
         );
-        MATRIX_CANDIDATE_HITS[slot].fetch_add(1, Ordering::Release);
+        unit_state.matrix_candidate_hits[slot].fetch_add(1, Ordering::Release);
         return;
     }
 }
@@ -7113,6 +7481,7 @@ fn scaled_affine_matrix(mut value: [f32; 12], scale: f32) -> Option<[f32; 12]> {
 /// Current player ownership for the exact native Simulate collider invocation.
 /// Caller return-site/RSI are checked separately; no capture result authorizes it.
 pub(crate) fn collider_rotation_scope(child: usize, collider: usize) -> Option<f32> {
+    let unit_state = current_unit_state();
     let base = MODULE_BASE.load(Ordering::Acquire);
     let scale = current_scale();
     let generation = cloth_topology_generation();
@@ -7148,19 +7517,22 @@ pub(crate) fn collider_rotation_scope(child: usize, collider: usize) -> Option<f
     {
         return None;
     }
-    let scope = *TARGET_CLOTH_SCOPE.try_read().ok()?;
-    let anchor = TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire);
+    let scope = *unit_state.target_cloth_scope.try_read().ok()?;
+    let anchor = unit_state
+        .target_cloth_pose_importer
+        .load(Ordering::Acquire);
     if scope.anchor == 0 || scope.anchor != anchor {
         return None;
     }
     let mut found = false;
     for route in scope.routes.iter().copied().filter(|r| r.owner != 0) {
         let Some(slot) = (0..CLOTH_INSTANCE_SLOTS).find(|&i| {
-            CLOTH_INSTANCE_OWNERS[i].load(Ordering::Acquire) == route.owner
-                && CLOTH_INSTANCE_INPUTS[i].load(Ordering::Acquire) == route.input
-                && CLOTH_INSTANCE_CORES[i].load(Ordering::Acquire) == route.core
-                && CLOTH_INSTANCE_APPLIED_SCALE_BITS[i].load(Ordering::Acquire) == scale.to_bits()
-                && CLOTH_INSTANCE_PENDING_SCALE_BITS[i].load(Ordering::Acquire)
+            unit_state.cloth_instance_owners[i].load(Ordering::Acquire) == route.owner
+                && unit_state.cloth_instance_inputs[i].load(Ordering::Acquire) == route.input
+                && unit_state.cloth_instance_cores[i].load(Ordering::Acquire) == route.core
+                && unit_state.cloth_instance_applied_scale_bits[i].load(Ordering::Acquire)
+                    == scale.to_bits()
+                && unit_state.cloth_instance_pending_scale_bits[i].load(Ordering::Acquire)
                     == NO_PENDING_CLOTH_SCALE_BITS
         }) else {
             continue;
@@ -7177,11 +7549,12 @@ pub(crate) fn collider_rotation_scope(child: usize, collider: usize) -> Option<f
                 found = true;
             }
         }
-        if CLOTH_INSTANCE_OWNERS[slot].load(Ordering::Acquire) != route.owner
-            || CLOTH_INSTANCE_INPUTS[slot].load(Ordering::Acquire) != route.input
-            || CLOTH_INSTANCE_CORES[slot].load(Ordering::Acquire) != route.core
-            || CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].load(Ordering::Acquire) != scale.to_bits()
-            || CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].load(Ordering::Acquire)
+        if unit_state.cloth_instance_owners[slot].load(Ordering::Acquire) != route.owner
+            || unit_state.cloth_instance_inputs[slot].load(Ordering::Acquire) != route.input
+            || unit_state.cloth_instance_cores[slot].load(Ordering::Acquire) != route.core
+            || unit_state.cloth_instance_applied_scale_bits[slot].load(Ordering::Acquire)
+                != scale.to_bits()
+            || unit_state.cloth_instance_pending_scale_bits[slot].load(Ordering::Acquire)
                 != NO_PENDING_CLOTH_SCALE_BITS
             || !scope.route_is_current(route, base, read_usize)
         {
@@ -7191,7 +7564,10 @@ pub(crate) fn collider_rotation_scope(child: usize, collider: usize) -> Option<f
     (found
         && generation == cloth_topology_generation()
         && scale.to_bits() == current_scale().to_bits()
-        && anchor == TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire))
+        && anchor
+            == unit_state
+                .target_cloth_pose_importer
+                .load(Ordering::Acquire))
     .then_some(scale)
 }
 // END253-COLLIDER-ROTATION-SCOPE
@@ -7199,6 +7575,7 @@ pub(crate) fn collider_rotation_scope(child: usize, collider: usize) -> Option<f
 /// Read-only, exact equipment/active-state selection for the one-shot recorder.
 /// No address from an old log or spatial-proximity match is accepted.
 pub(crate) fn diagnostic_targets() -> Option<[crate::cloth_diagnostic::Identity; 4]> {
+    let unit_state = current_unit_state();
     use crate::cloth_diagnostic::{COUNTS, Identity};
     let base = MODULE_BASE.load(Ordering::Acquire);
     let scale = current_scale();
@@ -7206,8 +7583,13 @@ pub(crate) fn diagnostic_targets() -> Option<[crate::cloth_diagnostic::Identity;
         return None;
     }
     let generation = cloth_topology_generation();
-    let scope = *TARGET_CLOTH_SCOPE.try_read().ok()?;
-    if scope.anchor == 0 || scope.anchor != TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire) {
+    let scope = *unit_state.target_cloth_scope.try_read().ok()?;
+    if scope.anchor == 0
+        || scope.anchor
+            != unit_state
+                .target_cloth_pose_importer
+                .load(Ordering::Acquire)
+    {
         return None;
     }
     let mut result = [Identity::default(); 4];
@@ -7237,12 +7619,13 @@ pub(crate) fn diagnostic_targets() -> Option<[crate::cloth_diagnostic::Identity;
         }
         found_model = true;
         let slot = (0..CLOTH_INSTANCE_SLOTS).find(|&s| {
-            CLOTH_INSTANCE_OWNERS[s].load(Ordering::Acquire) == route.owner
-                && CLOTH_INSTANCE_INPUTS[s].load(Ordering::Acquire) == route.input
+            unit_state.cloth_instance_owners[s].load(Ordering::Acquire) == route.owner
+                && unit_state.cloth_instance_inputs[s].load(Ordering::Acquire) == route.input
         })?;
-        if CLOTH_INSTANCE_CORES[slot].load(Ordering::Acquire) != route.core
-            || CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].load(Ordering::Acquire) != scale.to_bits()
-            || CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].load(Ordering::Acquire)
+        if unit_state.cloth_instance_cores[slot].load(Ordering::Acquire) != route.core
+            || unit_state.cloth_instance_applied_scale_bits[slot].load(Ordering::Acquire)
+                != scale.to_bits()
+            || unit_state.cloth_instance_pending_scale_bits[slot].load(Ordering::Acquire)
                 != NO_PENDING_CLOTH_SCALE_BITS
         {
             return None;
@@ -7310,6 +7693,7 @@ pub(crate) fn diagnostic_targets() -> Option<[crate::cloth_diagnostic::Identity;
 #[cfg(test)]
 #[test]
 fn diagnostic_selector_requires_exact_current_bd9004_active_children() {
+    let unit_state = current_unit_state();
     let _lock = MODULE_TEST_LOCK.lock().unwrap();
     let mut data = vec![0usize; 0x10000 / 8];
     let heap = data.as_ptr() as usize;
@@ -7376,15 +7760,19 @@ fn diagnostic_selector_requires_exact_current_bd9004_active_children() {
     }
     MODULE_BASE.store(image, Ordering::Release);
     HOOKS_READY.store(true, Ordering::Release);
-    TARGET_CLOTH_POSE_IMPORTER.store(heap + 0x1600, Ordering::Release);
-    TARGET_SCALE_BITS.store(0.5f32.to_bits(), Ordering::Release);
+    unit_state
+        .target_cloth_pose_importer
+        .store(heap + 0x1600, Ordering::Release);
+    unit_state
+        .target_scale_bits
+        .store(0.5f32.to_bits(), Ordering::Release);
     refresh_owned_cloth_inputs(heap + 0x100, heap + 0x1600);
     let slot = (0..CLOTH_INSTANCE_SLOTS)
-        .find(|&s| CLOTH_INSTANCE_OWNERS[s].load(Ordering::Acquire) == heap + 0xC00)
+        .find(|&s| unit_state.cloth_instance_owners[s].load(Ordering::Acquire) == heap + 0xC00)
         .unwrap();
-    CLOTH_INSTANCE_CORES[slot].store(heap + 0x1000, Ordering::Release);
-    CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].store(0.5f32.to_bits(), Ordering::Release);
-    CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(0, Ordering::Release);
+    unit_state.cloth_instance_cores[slot].store(heap + 0x1000, Ordering::Release);
+    unit_state.cloth_instance_applied_scale_bits[slot].store(0.5f32.to_bits(), Ordering::Release);
+    unit_state.cloth_instance_pending_scale_bits[slot].store(0, Ordering::Release);
     // BEGIN253-COLLIDER-ROTATION-TEST
     put(&mut data, 0x4168, heap + 0x8000);
     put(&mut data, 0x4170, 1);
@@ -7417,12 +7805,16 @@ fn diagnostic_selector_requires_exact_current_bd9004_active_children() {
         assert_eq!(rotation_scope(), None, "offset {at:x}");
         put(&mut data, at, old);
     }
-    CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(3f32.to_bits(), Ordering::Release);
+    unit_state.cloth_instance_pending_scale_bits[slot].store(3f32.to_bits(), Ordering::Release);
     assert_eq!(rotation_scope(), None);
-    CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(0, Ordering::Release);
-    TARGET_SCALE_BITS.store(1f32.to_bits(), Ordering::Release);
+    unit_state.cloth_instance_pending_scale_bits[slot].store(0, Ordering::Release);
+    unit_state
+        .target_scale_bits
+        .store(1f32.to_bits(), Ordering::Release);
     assert_eq!(rotation_scope(), None);
-    TARGET_SCALE_BITS.store(0.5f32.to_bits(), Ordering::Release);
+    unit_state
+        .target_scale_bits
+        .store(0.5f32.to_bits(), Ordering::Release);
     assert_eq!(rotation_scope(), Some(0.5));
     // END253-COLLIDER-ROTATION-TEST
     let original = data.clone();
@@ -7442,23 +7834,26 @@ fn diagnostic_selector_requires_exact_current_bd9004_active_children() {
     put(&mut data, 0x828, 0);
     assert!(diagnostic_targets().is_none());
     put(&mut data, 0x828, heap + 0xA00);
-    CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(3f32.to_bits(), Ordering::Release);
+    unit_state.cloth_instance_pending_scale_bits[slot].store(3f32.to_bits(), Ordering::Release);
     assert!(diagnostic_targets().is_none());
-    CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(0, Ordering::Release);
-    TARGET_SCALE_BITS.store(1f32.to_bits(), Ordering::Release);
+    unit_state.cloth_instance_pending_scale_bits[slot].store(0, Ordering::Release);
+    unit_state
+        .target_scale_bits
+        .store(1f32.to_bits(), Ordering::Release);
     assert!(diagnostic_targets().is_none());
     clear_target();
     MODULE_BASE.store(0, Ordering::Release);
     HOOKS_READY.store(false, Ordering::Release);
     for s in 0..CLOTH_INSTANCE_SLOTS {
-        CLOTH_INSTANCE_OWNERS[s].store(0, Ordering::Release);
-        CLOTH_INSTANCE_INPUTS[s].store(0, Ordering::Release);
+        unit_state.cloth_instance_owners[s].store(0, Ordering::Release);
+        unit_state.cloth_instance_inputs[s].store(0, Ordering::Release);
     }
-    *TARGET_CLOTH_SCOPE.write().unwrap() = ClothOwnerScope::default();
+    *unit_state.target_cloth_scope.write().unwrap() = ClothOwnerScope::default();
 }
 
 fn current_scale() -> f32 {
-    f32::from_bits(TARGET_SCALE_BITS.load(Ordering::Acquire))
+    let unit_state = current_unit_state();
+    f32::from_bits(unit_state.target_scale_bits.load(Ordering::Acquire))
 }
 
 fn committed_cloth_scale(bits: u32) -> Option<f32> {
@@ -7605,6 +8000,7 @@ mod tests {
 
     #[test]
     fn owned_equipment_inputs_reach_source_transition_and_collision_paths() {
+        let unit_state = current_unit_state();
         let _module_guard = MODULE_TEST_LOCK.lock().unwrap();
         // Three independent inputs mirror the frozen HD / BD / HR live chain.
         // A duplicate equipment slot must not double-apply the same owner.
@@ -7692,8 +8088,10 @@ mod tests {
         assembly[1] = back_reference;
         assembly[0x48 / 8] = models[2].as_ptr() as usize;
         MODULE_BASE.store(base, Ordering::Release);
-        TARGET_CLOTH_POSE_IMPORTER.store(anchor, Ordering::Release);
-        *TARGET_CLOTH_SCOPE.write().unwrap() = scope;
+        unit_state
+            .target_cloth_pose_importer
+            .store(anchor, Ordering::Release);
+        *unit_state.target_cloth_scope.write().unwrap() = scope;
         for i in 0..3 {
             record_cloth_instance_binding(owners[i].as_ptr() as usize, inputs[i].as_ptr() as usize);
         }
@@ -7776,7 +8174,8 @@ mod tests {
         );
         refresh_owned_cloth_inputs(player_address, anchor);
         assert_eq!(
-            CLOTH_INSTANCE_PENDING_SCALE_BITS[selected[1].unwrap().0].load(Ordering::Acquire),
+            unit_state.cloth_instance_pending_scale_bits[selected[1].unwrap().0]
+                .load(Ordering::Acquire),
             0
         );
         // Removing a selected-input equipment owner cannot resurrect it through
@@ -7787,15 +8186,16 @@ mod tests {
         clear_target();
         MODULE_BASE.store(0, Ordering::Release);
         for slot in 0..CLOTH_INSTANCE_SLOTS {
-            CLOTH_INSTANCE_OWNERS[slot].store(0, Ordering::Release);
-            CLOTH_INSTANCE_INPUTS[slot].store(0, Ordering::Release);
+            unit_state.cloth_instance_owners[slot].store(0, Ordering::Release);
+            unit_state.cloth_instance_inputs[slot].store(0, Ordering::Release);
         }
-        *TARGET_CLOTH_SCOPE.write().unwrap() = ClothOwnerScope::default();
+        *unit_state.target_cloth_scope.write().unwrap() = ClothOwnerScope::default();
     }
 
     #[test]
     #[ignore = "requires private replay data; set ER_CHARACTER_SCALE_FIXTURES"]
     fn bd9004_mesh_reference_hook_corrects_owned_fresh_frames() {
+        let unit_state = current_unit_state();
         let _lock = MODULE_TEST_LOCK.lock().unwrap();
         clear_target();
         let image = 0x140000000;
@@ -7860,15 +8260,21 @@ mod tests {
         }
         MODULE_BASE.store(image, Ordering::Release);
         HOOKS_READY.store(true, Ordering::Release);
-        TARGET_CLOTH_POSE_IMPORTER.store(heap + 0x2280, Ordering::Release);
-        TARGET_POSE_IMPORTER.store(heap + 0x2280, Ordering::Release);
-        TARGET_SCALE_BITS.store(0.5f32.to_bits(), Ordering::Release);
+        unit_state
+            .target_cloth_pose_importer
+            .store(heap + 0x2280, Ordering::Release);
+        unit_state
+            .target_pose_importer
+            .store(heap + 0x2280, Ordering::Release);
+        unit_state
+            .target_scale_bits
+            .store(0.5f32.to_bits(), Ordering::Release);
         refresh_owned_cloth_inputs(heap + 0x100, heap + 0x2280);
         let slot = (0..CLOTH_INSTANCE_SLOTS)
-            .find(|&s| CLOTH_INSTANCE_INPUTS[s].load(Ordering::Acquire) == heap + 0x1200)
+            .find(|&s| unit_state.cloth_instance_inputs[s].load(Ordering::Acquire) == heap + 0x1200)
             .unwrap();
-        CLOTH_INSTANCE_CORES[slot].store(heap + 0x1000, Ordering::Release);
-        CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(0, Ordering::Release);
+        unit_state.cloth_instance_cores[slot].store(heap + 0x1000, Ordering::Release);
+        unit_state.cloth_instance_pending_scale_bits[slot].store(0, Ordering::Release);
         let rows: Vec<Vec<f32>> = crate::test_fixtures::text("bd9004-mesh-reference-witness.txt")
             .lines()
             .filter(|s| !s.starts_with('#'))
@@ -7903,8 +8309,11 @@ mod tests {
             .collect();
         let expected = project(&baseline);
         for (scale, start) in [(0.5f32, 17), (1., 33), (3., 49), (0.5, 17), (0.5, 17)] {
-            TARGET_SCALE_BITS.store(scale.to_bits(), Ordering::Release);
-            CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].store(scale.to_bits(), Ordering::Release);
+            unit_state
+                .target_scale_bits
+                .store(scale.to_bits(), Ordering::Release);
+            unit_state.cloth_instance_applied_scale_bits[slot]
+                .store(scale.to_bits(), Ordering::Release);
             let fresh: Vec<[f32; 16]> = rows[1..]
                 .iter()
                 .map(|r| r[start..start + 16].try_into().unwrap())
@@ -7986,12 +8395,12 @@ mod tests {
         }
         for pending in [IN_PROGRESS_CLOTH_SCALE_BITS, 3f32.to_bits()] {
             refill();
-            CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(pending, Ordering::Release);
+            unit_state.cloth_instance_pending_scale_bits[slot].store(pending, Ordering::Release);
             let before = memory.clone();
             cloth_mesh_frame_hook(&mut registers);
             assert_eq!(memory, before);
         }
-        CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(0, Ordering::Release);
+        unit_state.cloth_instance_pending_scale_bits[slot].store(0, Ordering::Release);
         refill();
         let before_queries = crate::memory_query::query_count();
         cloth_mesh_frame_hook(&mut registers);
@@ -8037,8 +8446,11 @@ mod tests {
         let expected_area = area_project(&baseline_area);
         put(&mut memory, 0x3250, 1);
         for (scale, start) in [(0.5f32, 17), (1., 33), (3., 49), (0.5, 17)] {
-            TARGET_SCALE_BITS.store(scale.to_bits(), Ordering::Release);
-            CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].store(scale.to_bits(), Ordering::Release);
+            unit_state
+                .target_scale_bits
+                .store(scale.to_bits(), Ordering::Release);
+            unit_state.cloth_instance_applied_scale_bits[slot]
+                .store(scale.to_bits(), Ordering::Release);
             let fresh: Vec<[f32; 16]> = area_rows[1..]
                 .iter()
                 .map(|r| r[start..start + 16].try_into().unwrap())
@@ -8138,8 +8550,11 @@ mod tests {
                 ((heap + 0x3A28) as *mut u8).write(flags);
                 ((heap + 0x3A50) as *mut u8).write(flags);
             }
-            TARGET_SCALE_BITS.store(scale.to_bits(), Ordering::Release);
-            CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].store(scale.to_bits(), Ordering::Release);
+            unit_state
+                .target_scale_bits
+                .store(scale.to_bits(), Ordering::Release);
+            unit_state.cloth_instance_applied_scale_bits[slot]
+                .store(scale.to_bits(), Ordering::Release);
             let fresh: Vec<[f32; 16]> = rows[1..]
                 .iter()
                 .map(|r| r[start..start + 16].try_into().unwrap())
@@ -8184,7 +8599,7 @@ mod tests {
         }
         put(&mut memory, 0x3250, 1);
         refill();
-        let before_normals = CLOTH_MESH_NORMAL_ROWS.load(Ordering::Relaxed);
+        let before_normals = unit_state.cloth_mesh_normal_rows.load(Ordering::Relaxed);
         cloth_mesh_pn_hook(&mut pn_registers, pn_native as *const () as usize);
         for (i, frame) in native_half.iter().enumerate() {
             assert_eq!(
@@ -8193,7 +8608,7 @@ mod tests {
             );
         }
         assert_eq!(
-            CLOTH_MESH_NORMAL_ROWS.load(Ordering::Relaxed),
+            unit_state.cloth_mesh_normal_rows.load(Ordering::Relaxed),
             before_normals,
             "unverified PN area-mode must not be modified"
         );
@@ -8217,7 +8632,7 @@ mod tests {
             pn_timer.elapsed().as_micros() as f64 / 2000.
         );
         clear_target();
-        *TARGET_CLOTH_SCOPE.write().unwrap() = ClothOwnerScope::default();
+        *unit_state.target_cloth_scope.write().unwrap() = ClothOwnerScope::default();
         HOOKS_READY.store(false, Ordering::Release);
         MODULE_BASE.store(0, Ordering::Release);
     }
@@ -8325,6 +8740,7 @@ mod tests {
 
     #[test]
     fn render_hook_owns_fresh_ranges_and_rejects_lifecycle_changes() {
+        let unit_state = current_unit_state();
         let _lock = MODULE_TEST_LOCK.lock().unwrap();
         clear_target();
         let image = 0x140000000;
@@ -8389,16 +8805,23 @@ mod tests {
         put(&mut memory, 0x2100, 0b110);
         MODULE_BASE.store(image, Ordering::Release);
         HOOKS_READY.store(true, Ordering::Release);
-        TARGET_CLOTH_POSE_IMPORTER.store(heap + 0x2280, Ordering::Release);
-        TARGET_POSE_IMPORTER.store(heap + 0x2280, Ordering::Release);
-        TARGET_SCALE_BITS.store(0.5f32.to_bits(), Ordering::Release);
+        unit_state
+            .target_cloth_pose_importer
+            .store(heap + 0x2280, Ordering::Release);
+        unit_state
+            .target_pose_importer
+            .store(heap + 0x2280, Ordering::Release);
+        unit_state
+            .target_scale_bits
+            .store(0.5f32.to_bits(), Ordering::Release);
         refresh_owned_cloth_inputs(heap + 0x100, heap + 0x2280);
         let slot = (0..CLOTH_INSTANCE_SLOTS)
-            .find(|&i| CLOTH_INSTANCE_INPUTS[i].load(Ordering::Acquire) == heap + 0x1200)
+            .find(|&i| unit_state.cloth_instance_inputs[i].load(Ordering::Acquire) == heap + 0x1200)
             .unwrap();
-        CLOTH_INSTANCE_CORES[slot].store(heap + 0x1000, Ordering::Release);
-        CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].store(0.5f32.to_bits(), Ordering::Release);
-        CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(0, Ordering::Release);
+        unit_state.cloth_instance_cores[slot].store(heap + 0x1000, Ordering::Release);
+        unit_state.cloth_instance_applied_scale_bits[slot]
+            .store(0.5f32.to_bits(), Ordering::Release);
+        unit_state.cloth_instance_pending_scale_bits[slot].store(0, Ordering::Release);
         let this = heap + 0x1500;
         let before = render_scope(this, 0.5).expect("fixture must reach the real ownership gate");
         const RAW: [f32; 12] = [2., 0., 0., 0.4, 0., 2., 0., 0.8, 0., 0., 2., 0.2];
@@ -8439,8 +8862,11 @@ mod tests {
         registers.r9 = 0;
         registers.r8 = 4;
         for scale in [1.0f32, 3., 0.5] {
-            TARGET_SCALE_BITS.store(scale.to_bits(), Ordering::Release);
-            CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].store(scale.to_bits(), Ordering::Release);
+            unit_state
+                .target_scale_bits
+                .store(scale.to_bits(), Ordering::Release);
+            unit_state.cloth_instance_applied_scale_bits[slot]
+                .store(scale.to_bits(), Ordering::Release);
             cloth_render_range_hook(&mut registers, native as *const () as usize);
             assert_eq!(output[2][0], RAW[0] * scale);
             assert_eq!(output[2][7], RAW[7] / scale);
@@ -8453,12 +8879,16 @@ mod tests {
         cloth_render_range_hook(&mut registers, native as *const () as usize);
         assert_eq!(output, [RAW; 4]);
         registers.rsp = stack.as_ptr() as u64;
-        CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(3f32.to_bits(), Ordering::Release);
+        unit_state.cloth_instance_pending_scale_bits[slot].store(3f32.to_bits(), Ordering::Release);
         assert!(render_scope(this, 0.5).is_none());
-        CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].store(0, Ordering::Release);
-        TARGET_POSE_IMPORTER.store(heap + 0x1200, Ordering::Release);
+        unit_state.cloth_instance_pending_scale_bits[slot].store(0, Ordering::Release);
+        unit_state
+            .target_pose_importer
+            .store(heap + 0x1200, Ordering::Release);
         assert!(render_scope(this, 0.5).is_none());
-        TARGET_POSE_IMPORTER.store(heap + 0x2280, Ordering::Release);
+        unit_state
+            .target_pose_importer
+            .store(heap + 0x2280, Ordering::Release);
         assert_eq!(
             reconcile_render_output(this, heap + 0x1A00, 3, 0, 0.5, before),
             None
@@ -8469,7 +8899,9 @@ mod tests {
             None
         );
         put(&mut memory, 0x828, heap + 0xA00);
-        CLOTH_TOPOLOGY_GENERATION.fetch_add(1, Ordering::AcqRel);
+        unit_state
+            .cloth_topology_generation
+            .fetch_add(1, Ordering::AcqRel);
         assert_eq!(
             reconcile_render_output(this, output.as_mut_ptr() as usize, 4, 0, 0.5, before),
             None
@@ -8494,9 +8926,9 @@ mod tests {
         HOOKS_READY.store(false, Ordering::Release);
         MODULE_BASE.store(0, Ordering::Release);
         for i in 0..CLOTH_INSTANCE_SLOTS {
-            CLOTH_INSTANCE_OWNERS[i].store(0, Ordering::Release);
-            CLOTH_INSTANCE_INPUTS[i].store(0, Ordering::Release);
-            CLOTH_INSTANCE_WAS_EQUIPMENT[i].store(false, Ordering::Release);
+            unit_state.cloth_instance_owners[i].store(0, Ordering::Release);
+            unit_state.cloth_instance_inputs[i].store(0, Ordering::Release);
+            unit_state.cloth_instance_was_equipment[i].store(false, Ordering::Release);
         }
         assert!(
             query_delta <= 12 * 2000,
@@ -9871,4 +10303,334 @@ mod tests {
             matrix_candidate_key(MATRIX_CANDIDATE_KIND_SINGLE, 0x1235)
         );
     }
+}
+
+/// Per-character state; native hooks retain an Arc for their full invocation.
+pub(crate) struct UnitState {
+    identity: RwLock<Option<crate::unit_runtime::Identity>>,
+    cloth_skin_normal_calls: AtomicU64,
+    cloth_skin_normal_rows: AtomicU64,
+    cloth_skin_normal_max_us: AtomicU64,
+    cloth_mesh_frame_calls: AtomicU64,
+    cloth_mesh_frames_written: AtomicU64,
+    cloth_mesh_frame_seen: AtomicU64,
+    cloth_mesh_frame_max_us: AtomicU64,
+    cloth_mesh_frame_max_queries: AtomicU64,
+    cloth_mesh_normal_rows: AtomicU64,
+    cloth_mesh_pn_max_us: AtomicU64,
+    cloth_mesh_area_calls: AtomicU64,
+    cloth_mesh_area_frames: AtomicU64,
+    target_pose_importer: AtomicUsize,
+    target_cloth_pose_importer: AtomicUsize,
+    target_anim_skeleton: AtomicUsize,
+    target_cloth_scope: RwLock<ClothOwnerScope>,
+    target_scale_bits: AtomicU32,
+    pose_applied_scale_bits: AtomicU32,
+    cloth_pose_applied_scale_bits: AtomicU32,
+    pose_write_lock: AtomicBool,
+    pose_target_calls: AtomicU64,
+    pose_transforms_written: AtomicU64,
+    cloth_pose_target_calls: AtomicU64,
+    cloth_pose_transforms_written: AtomicU64,
+    pose_gate_00: AtomicU64,
+    pose_gate_01: AtomicU64,
+    pose_gate_10: AtomicU64,
+    pose_gate_11: AtomicU64,
+    pose_gate_other: AtomicU64,
+    affine_single_target_calls: AtomicU64,
+    affine_single_matrices_written: AtomicU64,
+    affine_range_target_calls: AtomicU64,
+    affine_range_matrices_written: AtomicU64,
+    affine_range_provider_successes: AtomicU64,
+    affine_range_provider_identities: AtomicU64,
+    affine_range_provider_failures: AtomicU64,
+    single_target_calls: AtomicU64,
+    single_matrices_written: AtomicU64,
+    range_target_calls: AtomicU64,
+    range_matrices_written: AtomicU64,
+    rejected_outputs: AtomicU64,
+    render_calls: AtomicU64,
+    render_rows: AtomicU64,
+    render_rejected: AtomicU64,
+    render_max_us: AtomicU64,
+    render_max_queries: AtomicU64,
+    cloth_setter_calls: AtomicU64,
+    cloth_slot_inserts: AtomicU64,
+    cloth_slot_replacements: AtomicU64,
+    cloth_topology_generation: AtomicU64,
+    cloth_replacement_cursor: AtomicUsize,
+    cloth_instance_owners: [AtomicUsize; CLOTH_INSTANCE_SLOTS],
+    cloth_instance_inputs: [AtomicUsize; CLOTH_INSTANCE_SLOTS],
+    cloth_instance_was_equipment: [AtomicBool; CLOTH_INSTANCE_SLOTS],
+    cloth_instance_source_calls: [AtomicU64; CLOTH_INSTANCE_SLOTS],
+    cloth_instance_commits: [AtomicU64; CLOTH_INSTANCE_SLOTS],
+    cloth_instance_setter_hits: [AtomicU64; CLOTH_INSTANCE_SLOTS],
+    cloth_instance_cores: [AtomicUsize; CLOTH_INSTANCE_SLOTS],
+    cloth_instance_applied_scale_bits: [AtomicU32; CLOTH_INSTANCE_SLOTS],
+    cloth_instance_pending_scale_bits: [AtomicU32; CLOTH_INSTANCE_SLOTS],
+    cloth_pending_slot_mask: AtomicU64,
+    cloth_scale_transitions_queued: AtomicU64,
+    cloth_scale_transitions_deferred: AtomicU64,
+    cloth_scale_transitions_rejected: AtomicU64,
+    cloth_scale_reference_commits: AtomicU64,
+    cloth_scale_wrapper_deferred: AtomicU64,
+    cloth_scale_wrapper_rejected: AtomicU64,
+    cloth_secondary_reference_calls: AtomicU64,
+    cloth_secondary_reference_adjusted: AtomicU64,
+    cloth_secondary_reference_passthrough: AtomicU64,
+    cloth_secondary_reference_rejected: AtomicU64,
+    cloth_secondary_probe_calls: AtomicU64,
+    cloth_secondary_source_owner_e0_matches: AtomicU64,
+    cloth_secondary_source_owner_e0_mismatches: AtomicU64,
+    cloth_secondary_pre_core_requested: AtomicU64,
+    cloth_secondary_pre_core_unit: AtomicU64,
+    cloth_secondary_pre_core_other: AtomicU64,
+    cloth_secondary_post_core_requested: AtomicU64,
+    cloth_secondary_post_core_unit: AtomicU64,
+    cloth_secondary_post_core_other: AtomicU64,
+    cloth_secondary_post_copy_matches: AtomicU64,
+    cloth_secondary_post_copy_mismatches: AtomicU64,
+    cloth_solver_source_bracket_calls: AtomicU64,
+    cloth_solver_source_bracket_transforms: AtomicU64,
+    cloth_solver_source_bracket_restores: AtomicU64,
+    cloth_solver_source_bracket_rejected: AtomicU64,
+    cloth_solver_source_direct_transforms: AtomicU64,
+    cloth_solver_source_lazy_candidates: AtomicU64,
+    cloth_solver_source_lazy_resolved: AtomicU64,
+    cloth_solver_source_lazy_rejected: AtomicU64,
+    cloth_solver_source_local_scale_calls: AtomicU64,
+    cloth_solver_source_local_scale_transforms: AtomicU64,
+    cloth_solver_source_local_scale_restores: AtomicU64,
+    cloth_solver_source_local_scale_rejected: AtomicU64,
+    cloth_solver_source_local_scale_passthrough: AtomicU64,
+    cloth_solver_private_context_calls: AtomicU64,
+    cloth_solver_private_context_returns: AtomicU64,
+    cloth_secondary_core_changed: AtomicU64,
+    cloth_secondary_dirty_marked: AtomicU64,
+    cloth_secondary_dirty_rejected: AtomicU64,
+    cloth_immediate_probe_transitions: AtomicU64,
+    cloth_immediate_children_observed: AtomicU64,
+    cloth_immediate_particle_matches: AtomicU64,
+    cloth_immediate_transform_matches: AtomicU64,
+    cloth_immediate_both_matches: AtomicU64,
+    cloth_immediate_unreadable: AtomicU64,
+    cloth_transform_resync_calls: AtomicU64,
+    cloth_transform_resync_children_observed: AtomicU64,
+    cloth_transform_resync_children_changed: AtomicU64,
+    cloth_transform_resync_entries_observed: AtomicU64,
+    cloth_transform_resync_entries_changed: AtomicU64,
+    cloth_transform_resync_entries_already_scaled: AtomicU64,
+    cloth_transform_resync_entries_rejected: AtomicU64,
+    cloth_transform_resync_topology_rejected: AtomicU64,
+    cloth_attachment_position_buffers_shifted: AtomicU64,
+    cloth_attachment_particles_shifted: AtomicU64,
+    cloth_attachment_aabbs_shifted: AtomicU64,
+    cloth_attachment_position_rejected: AtomicU64,
+    matrix_candidate_keys: [AtomicU64; MATRIX_CANDIDATE_SLOTS],
+    matrix_candidate_hits: [AtomicU64; MATRIX_CANDIDATE_SLOTS],
+    matrix_candidate_kinds: [AtomicU32; MATRIX_CANDIDATE_SLOTS],
+    matrix_candidate_caller_rvas: [AtomicUsize; MATRIX_CANDIDATE_SLOTS],
+    matrix_candidate_first_this: [AtomicUsize; MATRIX_CANDIDATE_SLOTS],
+    matrix_candidate_last_this: [AtomicUsize; MATRIX_CANDIDATE_SLOTS],
+    matrix_candidate_outputs: [AtomicUsize; MATRIX_CANDIDATE_SLOTS],
+    matrix_candidate_arg8: [AtomicU32; MATRIX_CANDIDATE_SLOTS],
+    matrix_candidate_arg9: [AtomicU32; MATRIX_CANDIDATE_SLOTS],
+    matrix_candidate_qword_48: [AtomicUsize; MATRIX_CANDIDATE_SLOTS],
+    matrix_candidate_qword_68: [AtomicUsize; MATRIX_CANDIDATE_SLOTS],
+    matrix_candidate_qword_88: [AtomicUsize; MATRIX_CANDIDATE_SLOTS],
+}
+
+impl UnitState {
+    pub(crate) fn set_identity(&self, identity: crate::unit_runtime::Identity) {
+        if let Ok(mut slot) = self.identity.write() {
+            *slot = Some(identity);
+        }
+    }
+    fn identity_current(&self) -> bool {
+        self.identity
+            .try_read()
+            .is_ok_and(|identity| identity.is_none_or(|identity| identity.current()))
+    }
+}
+
+impl Default for UnitState {
+    fn default() -> Self {
+        Self {
+            identity: RwLock::new(None),
+            cloth_skin_normal_calls: AtomicU64::new(0),
+            cloth_skin_normal_rows: AtomicU64::new(0),
+            cloth_skin_normal_max_us: AtomicU64::new(0),
+            cloth_mesh_frame_calls: AtomicU64::new(0),
+            cloth_mesh_frames_written: AtomicU64::new(0),
+            cloth_mesh_frame_seen: AtomicU64::new(0),
+            cloth_mesh_frame_max_us: AtomicU64::new(0),
+            cloth_mesh_frame_max_queries: AtomicU64::new(0),
+            cloth_mesh_normal_rows: AtomicU64::new(0),
+            cloth_mesh_pn_max_us: AtomicU64::new(0),
+            cloth_mesh_area_calls: AtomicU64::new(0),
+            cloth_mesh_area_frames: AtomicU64::new(0),
+            target_pose_importer: AtomicUsize::new(0),
+            target_cloth_pose_importer: AtomicUsize::new(0),
+            target_anim_skeleton: AtomicUsize::new(0),
+            target_cloth_scope: RwLock::new(ClothOwnerScope {
+                player: 0,
+                player_model: 0,
+                assembly: 0,
+                anchor: 0,
+                routes: [ClothOwnerRoute {
+                    slot_address: 0,
+                    model: 0,
+                    owner: 0,
+                    input: 0,
+                    inner: 0,
+                    core: 0,
+                }; 27],
+            }),
+            target_scale_bits: AtomicU32::new(1.0f32.to_bits()),
+            pose_applied_scale_bits: AtomicU32::new(1.0f32.to_bits()),
+            cloth_pose_applied_scale_bits: AtomicU32::new(1.0f32.to_bits()),
+            pose_write_lock: AtomicBool::new(false),
+            pose_target_calls: AtomicU64::new(0),
+            pose_transforms_written: AtomicU64::new(0),
+            cloth_pose_target_calls: AtomicU64::new(0),
+            cloth_pose_transforms_written: AtomicU64::new(0),
+            pose_gate_00: AtomicU64::new(0),
+            pose_gate_01: AtomicU64::new(0),
+            pose_gate_10: AtomicU64::new(0),
+            pose_gate_11: AtomicU64::new(0),
+            pose_gate_other: AtomicU64::new(0),
+            affine_single_target_calls: AtomicU64::new(0),
+            affine_single_matrices_written: AtomicU64::new(0),
+            affine_range_target_calls: AtomicU64::new(0),
+            affine_range_matrices_written: AtomicU64::new(0),
+            affine_range_provider_successes: AtomicU64::new(0),
+            affine_range_provider_identities: AtomicU64::new(0),
+            affine_range_provider_failures: AtomicU64::new(0),
+            single_target_calls: AtomicU64::new(0),
+            single_matrices_written: AtomicU64::new(0),
+            range_target_calls: AtomicU64::new(0),
+            range_matrices_written: AtomicU64::new(0),
+            rejected_outputs: AtomicU64::new(0),
+            render_calls: AtomicU64::new(0),
+            render_rows: AtomicU64::new(0),
+            render_rejected: AtomicU64::new(0),
+            render_max_us: AtomicU64::new(0),
+            render_max_queries: AtomicU64::new(0),
+            cloth_setter_calls: AtomicU64::new(0),
+            cloth_slot_inserts: AtomicU64::new(0),
+            cloth_slot_replacements: AtomicU64::new(0),
+            cloth_topology_generation: AtomicU64::new(0),
+            cloth_replacement_cursor: AtomicUsize::new(0),
+            cloth_instance_owners: [const { AtomicUsize::new(0) }; CLOTH_INSTANCE_SLOTS],
+            cloth_instance_inputs: [const { AtomicUsize::new(0) }; CLOTH_INSTANCE_SLOTS],
+            cloth_instance_was_equipment: [const { AtomicBool::new(false) }; CLOTH_INSTANCE_SLOTS],
+            cloth_instance_source_calls: [const { AtomicU64::new(0) }; CLOTH_INSTANCE_SLOTS],
+            cloth_instance_commits: [const { AtomicU64::new(0) }; CLOTH_INSTANCE_SLOTS],
+            cloth_instance_setter_hits: [const { AtomicU64::new(0) }; CLOTH_INSTANCE_SLOTS],
+            cloth_instance_cores: [const { AtomicUsize::new(0) }; CLOTH_INSTANCE_SLOTS],
+            cloth_instance_applied_scale_bits: [const { AtomicU32::new(1.0f32.to_bits()) };
+                CLOTH_INSTANCE_SLOTS],
+            cloth_instance_pending_scale_bits: [const { AtomicU32::new(NO_PENDING_CLOTH_SCALE_BITS) };
+                CLOTH_INSTANCE_SLOTS],
+            cloth_pending_slot_mask: AtomicU64::new(0),
+            cloth_scale_transitions_queued: AtomicU64::new(0),
+            cloth_scale_transitions_deferred: AtomicU64::new(0),
+            cloth_scale_transitions_rejected: AtomicU64::new(0),
+            cloth_scale_reference_commits: AtomicU64::new(0),
+            cloth_scale_wrapper_deferred: AtomicU64::new(0),
+            cloth_scale_wrapper_rejected: AtomicU64::new(0),
+            cloth_secondary_reference_calls: AtomicU64::new(0),
+            cloth_secondary_reference_adjusted: AtomicU64::new(0),
+            cloth_secondary_reference_passthrough: AtomicU64::new(0),
+            cloth_secondary_reference_rejected: AtomicU64::new(0),
+            cloth_secondary_probe_calls: AtomicU64::new(0),
+            cloth_secondary_source_owner_e0_matches: AtomicU64::new(0),
+            cloth_secondary_source_owner_e0_mismatches: AtomicU64::new(0),
+            cloth_secondary_pre_core_requested: AtomicU64::new(0),
+            cloth_secondary_pre_core_unit: AtomicU64::new(0),
+            cloth_secondary_pre_core_other: AtomicU64::new(0),
+            cloth_secondary_post_core_requested: AtomicU64::new(0),
+            cloth_secondary_post_core_unit: AtomicU64::new(0),
+            cloth_secondary_post_core_other: AtomicU64::new(0),
+            cloth_secondary_post_copy_matches: AtomicU64::new(0),
+            cloth_secondary_post_copy_mismatches: AtomicU64::new(0),
+            cloth_solver_source_bracket_calls: AtomicU64::new(0),
+            cloth_solver_source_bracket_transforms: AtomicU64::new(0),
+            cloth_solver_source_bracket_restores: AtomicU64::new(0),
+            cloth_solver_source_bracket_rejected: AtomicU64::new(0),
+            cloth_solver_source_direct_transforms: AtomicU64::new(0),
+            cloth_solver_source_lazy_candidates: AtomicU64::new(0),
+            cloth_solver_source_lazy_resolved: AtomicU64::new(0),
+            cloth_solver_source_lazy_rejected: AtomicU64::new(0),
+            cloth_solver_source_local_scale_calls: AtomicU64::new(0),
+            cloth_solver_source_local_scale_transforms: AtomicU64::new(0),
+            cloth_solver_source_local_scale_restores: AtomicU64::new(0),
+            cloth_solver_source_local_scale_rejected: AtomicU64::new(0),
+            cloth_solver_source_local_scale_passthrough: AtomicU64::new(0),
+            cloth_solver_private_context_calls: AtomicU64::new(0),
+            cloth_solver_private_context_returns: AtomicU64::new(0),
+            cloth_secondary_core_changed: AtomicU64::new(0),
+            cloth_secondary_dirty_marked: AtomicU64::new(0),
+            cloth_secondary_dirty_rejected: AtomicU64::new(0),
+            cloth_immediate_probe_transitions: AtomicU64::new(0),
+            cloth_immediate_children_observed: AtomicU64::new(0),
+            cloth_immediate_particle_matches: AtomicU64::new(0),
+            cloth_immediate_transform_matches: AtomicU64::new(0),
+            cloth_immediate_both_matches: AtomicU64::new(0),
+            cloth_immediate_unreadable: AtomicU64::new(0),
+            cloth_transform_resync_calls: AtomicU64::new(0),
+            cloth_transform_resync_children_observed: AtomicU64::new(0),
+            cloth_transform_resync_children_changed: AtomicU64::new(0),
+            cloth_transform_resync_entries_observed: AtomicU64::new(0),
+            cloth_transform_resync_entries_changed: AtomicU64::new(0),
+            cloth_transform_resync_entries_already_scaled: AtomicU64::new(0),
+            cloth_transform_resync_entries_rejected: AtomicU64::new(0),
+            cloth_transform_resync_topology_rejected: AtomicU64::new(0),
+            cloth_attachment_position_buffers_shifted: AtomicU64::new(0),
+            cloth_attachment_particles_shifted: AtomicU64::new(0),
+            cloth_attachment_aabbs_shifted: AtomicU64::new(0),
+            cloth_attachment_position_rejected: AtomicU64::new(0),
+            matrix_candidate_keys: [const { AtomicU64::new(0) }; MATRIX_CANDIDATE_SLOTS],
+            matrix_candidate_hits: [const { AtomicU64::new(0) }; MATRIX_CANDIDATE_SLOTS],
+            matrix_candidate_kinds: [const { AtomicU32::new(0) }; MATRIX_CANDIDATE_SLOTS],
+            matrix_candidate_caller_rvas: [const { AtomicUsize::new(0) }; MATRIX_CANDIDATE_SLOTS],
+            matrix_candidate_first_this: [const { AtomicUsize::new(0) }; MATRIX_CANDIDATE_SLOTS],
+            matrix_candidate_last_this: [const { AtomicUsize::new(0) }; MATRIX_CANDIDATE_SLOTS],
+            matrix_candidate_outputs: [const { AtomicUsize::new(0) }; MATRIX_CANDIDATE_SLOTS],
+            matrix_candidate_arg8: [const { AtomicU32::new(0) }; MATRIX_CANDIDATE_SLOTS],
+            matrix_candidate_arg9: [const { AtomicU32::new(0) }; MATRIX_CANDIDATE_SLOTS],
+            matrix_candidate_qword_48: [const { AtomicUsize::new(0) }; MATRIX_CANDIDATE_SLOTS],
+            matrix_candidate_qword_68: [const { AtomicUsize::new(0) }; MATRIX_CANDIDATE_SLOTS],
+            matrix_candidate_qword_88: [const { AtomicUsize::new(0) }; MATRIX_CANDIDATE_SLOTS],
+        }
+    }
+}
+
+thread_local! {
+    static CURRENT_UNIT: RefCell<Option<std::sync::Arc<UnitState>>> = const { RefCell::new(None) };
+}
+static DEFAULT_UNIT: std::sync::OnceLock<std::sync::Arc<UnitState>> = std::sync::OnceLock::new();
+
+pub(crate) fn default_unit_state() -> std::sync::Arc<UnitState> {
+    DEFAULT_UNIT
+        .get_or_init(|| std::sync::Arc::new(UnitState::default()))
+        .clone()
+}
+
+fn current_unit_state() -> std::sync::Arc<UnitState> {
+    CURRENT_UNIT
+        .with(|slot| slot.borrow().clone())
+        .unwrap_or_else(default_unit_state)
+}
+
+struct UnitGuard(Option<std::sync::Arc<UnitState>>);
+impl Drop for UnitGuard {
+    fn drop(&mut self) {
+        CURRENT_UNIT.with(|slot| *slot.borrow_mut() = self.0.take());
+    }
+}
+
+pub(crate) fn with_unit_state<T>(state: &std::sync::Arc<UnitState>, run: impl FnOnce() -> T) -> T {
+    let _guard = UnitGuard(CURRENT_UNIT.with(|slot| slot.replace(Some(state.clone()))));
+    run()
 }

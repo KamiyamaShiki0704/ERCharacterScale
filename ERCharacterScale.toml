@@ -1,0 +1,128 @@
+# ERCharacterScale — UTF-8 TOML. Edit before starting the game.
+# Scale is relative to each unit's original size; supported range: 0.5 .. 3.0.
+# First complete matching rule wins. Rules never multiply each other.
+version = 1
+enabled = true
+
+[player]
+enabled = true
+
+[enemies]
+enabled = false
+
+[[rules]]
+name = "player-effect-21202000"
+target = "player"
+mode = "speffect"
+sp_effect_id = 21202000
+scale = 1.05
+
+[[rules]]
+name = "player-effect-21202001"
+target = "player"
+mode = "speffect"
+sp_effect_id = 21202001
+scale = 1.10
+
+[[rules]]
+name = "player-effect-21202002"
+target = "player"
+mode = "speffect"
+sp_effect_id = 21202002
+scale = 1.15
+
+[[rules]]
+name = "player-effect-21202003"
+target = "player"
+mode = "speffect"
+sp_effect_id = 21202003
+scale = 1.20
+
+[[rules]]
+name = "player-effect-21202004"
+target = "player"
+mode = "speffect"
+sp_effect_id = 21202004
+scale = 1.25
+
+[[rules]]
+name = "player-effect-21202005"
+target = "player"
+mode = "speffect"
+sp_effect_id = 21202005
+scale = 1.30
+
+[[rules]]
+name = "player-effect-21202050"
+target = "player"
+mode = "speffect"
+sp_effect_id = 21202050
+scale = 0.95
+
+[[rules]]
+name = "player-effect-21202051"
+target = "player"
+mode = "speffect"
+sp_effect_id = 21202051
+scale = 0.90
+
+[[rules]]
+name = "player-effect-21202052"
+target = "player"
+mode = "speffect"
+sp_effect_id = 21202052
+scale = 0.85
+
+[[rules]]
+name = "player-effect-21202053"
+target = "player"
+mode = "speffect"
+sp_effect_id = 21202053
+scale = 0.80
+
+[[rules]]
+name = "player-effect-21202054"
+target = "player"
+mode = "speffect"
+sp_effect_id = 21202054
+scale = 0.75
+
+[[rules]]
+name = "player-effect-21202055"
+target = "player"
+mode = "speffect"
+sp_effect_id = 21202055
+scale = 0.70
+
+[[rules]]
+name = "player-effect-8020400"
+target = "player"
+mode = "speffect"
+sp_effect_id = 8020400
+scale = 0.50
+
+[[rules]]
+name = "player-effect-8020401"
+target = "player"
+mode = "speffect"
+sp_effect_id = 8020401
+scale = 3.00
+
+# To use unconditional player scaling, replace the rules above with:
+# [[rules]]
+# name = "fixed-player"
+# target = "player"
+# mode = "constant"
+# scale = 0.75
+
+# Enemy example: enable [enemies], then uncomment and use real target IDs.
+# [[rules]]
+# name = "selected-enemy"
+# target = "enemy"
+# npc_param_ids = [123456] # Example placeholder, NOT a verified enemy ID.
+# mode = "speffect"
+# sp_effect_id = 8020400
+# scale = 1.5
+# Optional filters: character_ids = [1234], entity_ids = [12345678].
+# Lists use OR; multiple filter fields use AND. Omit unused filters.
+# A constant enemy rule at the end can be used as a fallback.

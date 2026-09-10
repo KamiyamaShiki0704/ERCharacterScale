@@ -54,7 +54,7 @@ pub fn line(args: Arguments<'_>) {
     write_log_file(&text);
 }
 
-fn log_path_from_module(module: usize) -> Option<PathBuf> {
+pub(crate) fn log_path_from_module(module: usize) -> Option<PathBuf> {
     let mut buffer = [0u16; 32768];
     let len = unsafe { GetModuleFileNameW(Some(HMODULE(module as *mut c_void)), &mut buffer) };
 

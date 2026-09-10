@@ -1,5 +1,6 @@
 // Frozen 2.41 decision oracle, TEST ONLY. Keep rejection behavior unchanged in 2.42.
 fn skin_normal_call_241(op: usize, context: usize) -> Option<SkinNormalCall> {
+    let unit_state = current_unit_state();
     let base = MODULE_BASE.load(Ordering::Acquire);
     let scale = current_scale();
     if !HOOKS_READY.load(Ordering::Acquire)
@@ -10,21 +11,21 @@ fn skin_normal_call_241(op: usize, context: usize) -> Option<SkinNormalCall> {
     }
     let root = read_usize(context.checked_add(0x10)?)?;
     let generation = cloth_topology_generation();
-    let scope = *TARGET_CLOTH_SCOPE.try_read().ok()?;
-    if scope.anchor == 0 || scope.anchor != TARGET_CLOTH_POSE_IMPORTER.load(Ordering::Acquire) {
+    let scope = *unit_state.target_cloth_scope.try_read().ok()?;
+    if scope.anchor == 0 || scope.anchor != unit_state.target_cloth_pose_importer.load(Ordering::Acquire) {
         return None;
     }
     let mut selected = None;
     for route in scope.routes.iter().copied().filter(|r| r.owner != 0) {
         let Some(slot) = (0..CLOTH_INSTANCE_SLOTS).find(|&s| {
-            CLOTH_INSTANCE_OWNERS[s].load(Ordering::Acquire) == route.owner
-                && CLOTH_INSTANCE_INPUTS[s].load(Ordering::Acquire) == route.input
-                && CLOTH_INSTANCE_CORES[s].load(Ordering::Acquire) == route.core
+            unit_state.cloth_instance_owners[s].load(Ordering::Acquire) == route.owner
+                && unit_state.cloth_instance_inputs[s].load(Ordering::Acquire) == route.input
+                && unit_state.cloth_instance_cores[s].load(Ordering::Acquire) == route.core
         }) else {
             continue;
         };
-        if CLOTH_INSTANCE_APPLIED_SCALE_BITS[slot].load(Ordering::Acquire) != scale.to_bits()
-            || CLOTH_INSTANCE_PENDING_SCALE_BITS[slot].load(Ordering::Acquire)
+        if unit_state.cloth_instance_applied_scale_bits[slot].load(Ordering::Acquire) != scale.to_bits()
+            || unit_state.cloth_instance_pending_scale_bits[slot].load(Ordering::Acquire)
                 != NO_PENDING_CLOTH_SCALE_BITS
             || !scope.route_is_current(route, base, read_usize)
         {

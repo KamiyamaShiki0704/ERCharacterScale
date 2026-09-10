@@ -167,7 +167,10 @@ pub(crate) fn install(base: usize) -> bool {
     let result = unsafe {
         hook_closure_retn(
             base + ENTRY,
-            move |r, original| dispatch(base, r, original),
+            move |r, original| {
+                let child = (*r).rsi as usize;
+                body_scale_port::with_collider_unit(child, || dispatch(base, r, original))
+            },
             CallbackOption::None,
             HookFlags::empty(),
         )

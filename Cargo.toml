@@ -1,13 +1,15 @@
 [package]
 name = "player-scale-no-bone"
-version = "2.53.0"
+version = "2.54.0-rc.1"
 edition = "2024"
 publish = false
 license = "MIT"
-description = "Uniform local-player scaling with coherent cloth and collision for Elden Ring"
+description = "Configurable player and enemy scaling with coherent cloth and collision for Elden Ring"
 repository = "https://github.com/KamiyamaShiki0704/ERCharacterScale"
 
 [dependencies]
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8.23"
 eldenring = { git = "https://github.com/KamiyamaShiki0704/fromsoftware-rs", rev = "02fa5681e27fd2ecd9da79d34aef9fae96805539" }
 fromsoftware-shared = { git = "https://github.com/KamiyamaShiki0704/fromsoftware-rs", rev = "02fa5681e27fd2ecd9da79d34aef9fae96805539", package = "fromsoftware-shared" }
 ilhook = { version = "2.3.0", features = ["x64"] }

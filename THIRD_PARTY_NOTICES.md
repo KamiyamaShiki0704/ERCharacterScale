@@ -54,16 +54,22 @@ or vendored dependency source is included in this repository.
 | regex-automata | 0.4.18 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/regex) |
 | regex-syntax | 0.8.11 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/regex) |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/rustversion) |
+| serde | 1.0.229 | MIT OR Apache-2.0 | [upstream](https://github.com/serde-rs/serde) |
 | serde_core | 1.0.229 | MIT OR Apache-2.0 | [upstream](https://github.com/serde-rs/serde) |
 | serde_derive | 1.0.229 | MIT OR Apache-2.0 | [upstream](https://github.com/serde-rs/serde) |
+| serde_spanned | 0.6.9 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) |
 | smallvec | 1.15.2 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/rust-smallvec) |
 | syn | 2.0.119 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/syn) |
 | syn | 3.0.4 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/syn) |
 | thiserror | 1.0.69 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/thiserror) |
 | thiserror-impl | 1.0.69 | MIT OR Apache-2.0 | [upstream](https://github.com/dtolnay/thiserror) |
+| toml | 0.8.23 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) |
+| toml_datetime | 0.6.11 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) |
 | toml_datetime | 1.1.1+spec-1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) |
+| toml_edit | 0.22.27 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) |
 | toml_edit | 0.25.13+spec-1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) |
 | toml_parser | 1.1.3+spec-1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) |
+| toml_write | 0.1.2 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) |
 | undname | 2.1.2 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/Ryan-rsm-McKenzie/undname-rs) |
 | unicode-ident | 1.0.24 | (MIT OR Apache-2.0) AND Unicode-3.0 | [upstream](https://github.com/dtolnay/unicode-ident) |
 | vtable-rs | 0.1.5 | MIT | [upstream](https://github.com/tremwil/vtable-rs) |
@@ -94,6 +100,7 @@ or vendored dependency source is included in this repository.
 | windows_x86_64_gnu | 0.53.1 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) |
 | windows_x86_64_gnullvm | 0.53.1 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) |
 | windows_x86_64_msvc | 0.53.1 | MIT OR Apache-2.0 | [upstream](https://github.com/microsoft/windows-rs) |
+| winnow | 0.7.15 | MIT | [upstream](https://github.com/winnow-rs/winnow) |
 | winnow | 1.0.4 | MIT | [upstream](https://github.com/winnow-rs/winnow) |
 
 ## Reference-code notice
@@ -643,7 +650,7 @@ Applies to: bitfield 0.19.5 / LICENSE-APACHE, bitfield-macros 0.19.5 / LICENSE-A
 Applies to: bitfield 0.19.5 / LICENSE-MIT, bitfield-macros 0.19.5 / LICENSE-MIT
 
 ```text
-Copyright (c) 2017 Loïc Damien
+Copyright (c) 2017 Lo茂c Damien
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -1256,7 +1263,7 @@ DEALINGS IN THE SOFTWARE.
 Applies to: encoding_rs 0.8.35 / LICENSE-WHATWG
 
 ```text
-Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).
+Copyright 漏 WHATWG (Apple, Google, Mozilla, Microsoft).
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -2998,7 +3005,7 @@ UNICODE LICENSE V3
 
 COPYRIGHT AND PERMISSION NOTICE
 
-Copyright © 1991-2023 Unicode, Inc.
+Copyright 漏 1991-2023 Unicode, Inc.
 
 NOTICE TO USER: Carefully read the following legal agreement. BY
 DOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR

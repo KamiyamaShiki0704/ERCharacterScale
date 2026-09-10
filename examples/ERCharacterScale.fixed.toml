@@ -1,0 +1,22 @@
+# No SpEffect is required. Copy this file next to the DLL and rename it
+# ERCharacterScale.toml. Includes supported non-c0000 enemy models.
+version = 1
+enabled = true
+
+[player]
+enabled = true
+
+[enemies]
+enabled = true
+
+[[rules]]
+name = "fixed-player"
+target = "player"
+mode = "constant"
+scale = 0.75
+
+[[rules]]
+name = "fixed-enemies"
+target = "enemy"
+mode = "constant"
+scale = 0.5
