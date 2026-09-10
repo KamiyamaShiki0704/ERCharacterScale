@@ -1649,6 +1649,12 @@ fn real_271_pe_runtime_guard_and_negative_controls() {
         block += length;
     }
     assert_eq!(validate_runtime(base), Ok(()));
+    assert!(crate::unit_runtime::entry_state_supported(base));
+    for at in [0x3F0706, 0x3F0719, 0x3F8C59] {
+        image[at] ^= 1;
+        assert!(!crate::unit_runtime::entry_state_supported(base));
+        image[at] ^= 1;
+    }
     assert!(crate::unit_runtime::EnemyApi::validate(base).is_some());
     for at in [
         0x3F1C90, 0x3F1CB2, 0x3F1CDF, 0x51B5D0, 0x51B5E9, 0x51B580, 0x51B590, 0x51B5A0, 0x51B5B0,

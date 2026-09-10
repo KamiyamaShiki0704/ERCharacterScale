@@ -1,5 +1,18 @@
 # Validation
 
+## 2.54.0-rc.2 readiness regression
+
+Original executable inspection and read-only loaded-character observation identified
+the rc.1 startup rejection: a reciprocal entry has state 4 at +8, and ordinary local
+actors also have 4 at +9. The old fixtures incorrectly used state 2 and a zero next
+byte, so their passing results did not validate the real runtime readiness gate.
+
+The new regression passes loaded player/enemy entries through the actual identity
+and set-enumeration functions, rejects inactive states, and preserves remote-role
+exclusion. The original-PE test also corrupts each new readiness witness and checks
+rejection. These checks are separate from game observation of applied scales and
+from human assessment of animation and cloth quality.
+
 ## 2.54.0-rc.1 candidate
 
 The candidate adds configurable player/enemy rules and non-c0000 EnemyIns routes.
@@ -82,5 +95,5 @@ The GitHub release preserves the accepted binary rather than replacing it with a
 new local build. ItsSHA256 is
 `F40FC6B9793A08E280C0CAD21289D1C164B31764AC7297477A71BA4C684AC00B`.
 That release's Cargo metadata and runtime identify version2.53. The candidate uses
-version2.54.0-rc.1 and is a separate binary. Locally rebuilt files need not have the
+version2.54.0-rc.2 and is a separate binary. Locally rebuilt files need not have the
 same binary hash.

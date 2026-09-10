@@ -54,7 +54,8 @@ impl Character {
         result.put(offset_of!(ChrIns, chr_type), 5i32);
         result.put(offset_of!(ChrIns, chr_set_entry), result.at(0xA000));
         result.put(0xA000, result.address);
-        result.put(0xA008, 2u8);
+        result.put(0xA008, 4u8);
+        result.put(0xA009, 4u8);
         result.put(offset_of!(ChrIns, chr_ctrl), result.at(0x2000));
         result.put(offset_of!(ChrIns, modules), result.at(0x8000));
         result.put(offset_of!(ChrIns, special_effect), result.at(0x9000));

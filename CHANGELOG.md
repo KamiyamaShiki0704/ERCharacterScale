@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.54.0-rc.2 — loaded-character readiness fix
+
+- Fix the shared readiness gate rejecting loaded players and enemies: WW2.7.1.0 uses entry state 4, not the dependency's state-2 label.
+- Filter remote/ghost roles using ChrIns character type; entry byte +9 also contains 4 for ordinary local actors and cannot identify remote units.
+- Validate three original executable instruction windows before registering the scale task, including player-only configurations.
+- Distinguish a missing main-player pointer from failed player identity validation in the runtime log.
+- Add a regression for loaded player/enemy entries [4,4], retain inactive-state rejection, and correct the synthetic character fixture.
+- Preserve configuration schema, user rules, pinned dependency revision and the existing cloth/scale algorithms. In-game visual acceptance remains separate.
+
 ## 2.54.0-rc.1 — candidate, runtime acceptance pending
 
 - Add UTF-8 TOML configuration, ordered per-unit SpEffect rules and unconditional scaling.

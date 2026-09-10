@@ -9,6 +9,39 @@ use std::{
     sync::Arc,
 };
 
+// WW2.7.1.0: native ChrIns checks at 3F0716/3FE742 compare entry+8
+// against 4; the activation path at 3F8C56 writes 4. The pinned fsrs
+// ChrLoadStatus labels do not match this executable. entry+9 is not a
+// reliable network-role discriminator (loaded local actors also contain 4).
+const ACTIVE_ENTRY_STATE: u8 = 4;
+
+pub(crate) fn entry_state_supported(base: usize) -> bool {
+    ENTRY_STATE_CHECKS.iter().all(|(rva, expected)| {
+        let Some(address) = base.checked_add(*rva) else {
+            return false;
+        };
+        memory_query::accessible_region(address, expected.len(), false).is_some()
+            && unsafe { std::slice::from_raw_parts(address as *const u8, expected.len()) }
+                == *expected
+    })
+}
+
+pub(crate) enum TickStatus {
+    MainPlayerUnavailable,
+    PlayerIdentityRejected,
+    Ready,
+}
+
+impl TickStatus {
+    pub fn stage(self) -> &'static str {
+        match self {
+            Self::MainPlayerUnavailable => "main-player-unavailable",
+            Self::PlayerIdentityRejected => "player-identity-rejected",
+            Self::Ready => "local-player-ready",
+        }
+    }
+}
+
 pub(crate) fn read<T: Copy>(address: usize) -> Option<T> {
     memory_query::accessible_region(address, size_of::<T>(), false)?;
     Some(unsafe { (address as *const T).read_unaligned() })
@@ -43,7 +76,9 @@ impl Identity {
     fn capture_checked(address: usize, active: bool) -> Option<Self> {
         memory_query::accessible_region(address, size_of::<ChrIns>(), true)?;
         let entry = read::<usize>(address + offset_of!(ChrIns, chr_set_entry))?;
-        if read::<usize>(entry)? != address || (active && read::<u8>(entry + 8)? != 2) {
+        if read::<usize>(entry)? != address
+            || (active && read::<u8>(entry + 8)? != ACTIVE_ENTRY_STATE)
+        {
             return None;
         }
         let control = read::<usize>(address + offset_of!(ChrIns, chr_ctrl))?;
@@ -199,15 +234,26 @@ fn append_set_mode(
     )?;
     for i in 0..capacity {
         let slot = entries + i * size_of::<ChrSetEntry<ChrIns>>();
-        if read::<u8>(slot + 8) != Some(2) || (!include_remote && read::<u8>(slot + 9) == Some(4)) {
+        if read::<u8>(slot + 8) != Some(ACTIVE_ENTRY_STATE) {
             continue;
         }
         let address = read::<usize>(slot)?;
         if address != 0
-            && seen.insert(address)
+            && !seen.contains(&address)
             && memory_query::accessible_region(address, size_of::<ChrIns>(), false).is_some()
             && read::<usize>(address + offset_of!(ChrIns, chr_set_entry)) == Some(slot)
         {
+            // Filter using ChrIns::chr_type, not an unrelated entry byte.
+            // EnemyApi::kind additionally validates class/vtable before writes.
+            if !include_remote
+                && !matches!(
+                    read::<i32>(address + offset_of!(ChrIns, chr_type)),
+                    Some(0 | 5 | 20 | 21)
+                )
+            {
+                continue;
+            }
+            seen.insert(address);
             output.push(address);
         }
     }
@@ -387,15 +433,16 @@ impl Runtime {
         }
     }
 
-    pub fn tick(&mut self, world: &WorldChrMan, frame: u64) -> bool {
+    pub fn tick(&mut self, world: &WorldChrMan, frame: u64) -> TickStatus {
         let Some(pointer) = world.main_player.as_ref() else {
             self.suspend();
-            return false;
+            return TickStatus::MainPlayerUnavailable;
         };
         let player_address = pointer.as_ptr() as usize;
         let Some(player) = memory_query::scoped(|| Identity::capture(player_address)) else {
+            self.rejected(player_address, "main-player-identity-not-ready");
             self.suspend();
-            return false;
+            return TickStatus::PlayerIdentityRejected;
         };
         let mut addresses = vec![player_address];
         if self.api.is_some() {
@@ -532,7 +579,7 @@ impl Runtime {
                 if record.identity != next {
                     rebind_record(record, next);
                 }
-                if read::<u8>(record.identity.entry + 8) == Some(2) {
+                if read::<u8>(record.identity.entry + 8) == Some(ACTIVE_ENTRY_STATE) {
                     // Still active but no longer eligible (for example a summon
                     // role): restore its own baseline instead of parking it.
                     let mut record = self.records.remove(&address).expect("listed record");
@@ -633,7 +680,7 @@ impl Runtime {
             }
         }
         body_scale_port::refresh_unit_registry();
-        true
+        TickStatus::Ready
     }
 
     pub(crate) fn suspend(&mut self) {
@@ -712,6 +759,42 @@ include!("unit_native_checks.rs");
 mod tests {
     use super::*;
     use crate::body_scale_port::test_characters::{BASE, Character, Environment};
+
+    #[test]
+    fn loaded_player_and_enemy_with_native_entry_state_four_reach_identity_and_enumeration() {
+        let _environment = Environment::new();
+        // WW2.7.1.0: a loaded local player's reciprocal ChrSetEntry has
+        // bytes [4, 4] at +8/+9. The adjacent byte is not a network role.
+        let player = Character::new(0, 1, 1.0);
+        player.put(0, BASE + PLAYER_VTABLE_RVA);
+        player.put(offset_of!(ChrIns, chr_type), 0i32);
+        player.put(0xA008, 4u8);
+        player.put(0xA009, 4u8);
+        assert!(
+            Identity::capture(player.address).is_some(),
+            "loaded main player must not suspend all unit scaling"
+        );
+        let enemy = Character::new(9520, 2, 1.0);
+        enemy.put(0xA008, 4u8);
+        enemy.put(0xA009, 4u8);
+        assert!(Identity::capture(enemy.address).is_some());
+        let mut set = vec![0usize; size_of::<ChrSet<ChrIns>>().div_ceil(8)];
+        set[offset_of!(ChrSet<ChrIns>, capacity) / 8] = 1;
+        set[offset_of!(ChrSet<ChrIns>, entries) / 8] = enemy.at(0xA000);
+        let mut output = Vec::new();
+        append_set(set.as_ptr() as usize, &mut output, &mut HashSet::new()).unwrap();
+        assert_eq!(output, vec![enemy.address]);
+        for state in [0u8, 1, 2, 3, 5, 255] {
+            enemy.put(0xA008, state);
+            assert!(
+                Identity::capture(enemy.address).is_none(),
+                "entry state {state} must not authorize scaling"
+            );
+            output.clear();
+            append_set(set.as_ptr() as usize, &mut output, &mut HashSet::new()).unwrap();
+            assert!(output.is_empty());
+        }
+    }
 
     #[test]
     fn effects_belong_to_the_subject_and_constant_mode_ignores_a_broken_effect_list() {
@@ -797,13 +880,13 @@ mod tests {
                 0.5,
             );
         });
-        actor.put(0xA008, 4u8);
+        actor.put(0xA008, 2u8);
         assert!(Identity::capture(actor.address).is_none());
         assert_eq!(
             Identity::capture_checked(actor.address, false),
             Some(record.identity)
         );
-        actor.put(0xA008, 2u8);
+        actor.put(0xA008, 4u8);
         actor.put(0xE000, BASE + cloth_owner_scope::CHARACTER_MODEL_VTABLE_RVA);
         actor.put(offset_of!(ChrIns, chr_model_ins), actor.at(0xE000));
         rebind_record(&mut record, actor.identity());
@@ -859,7 +942,7 @@ mod tests {
         append_set(set.as_ptr() as usize, &mut out, &mut seen).unwrap();
         append_set(set.as_ptr() as usize, &mut out, &mut seen).unwrap();
         assert_eq!(out, vec![actor.address]);
-        actor.put(0xA009, 4u8);
+        actor.put(offset_of!(ChrIns, chr_type), 3i32);
         seen.clear();
         out.clear();
         append_set(set.as_ptr() as usize, &mut out, &mut seen).unwrap();

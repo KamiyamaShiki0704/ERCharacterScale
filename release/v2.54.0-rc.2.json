@@ -1,0 +1,33 @@
+{
+  "version": "2.54.0-rc.2",
+  "build_mode": "er-2.54-configurable-units-rc2",
+  "release_kind": "candidate; readiness fix; human visual acceptance pending",
+  "artifact": "player_scale_no_bone.dll",
+  "bytes": 1622016,
+  "sha256": "FAFD95640E0F596308946CB1C75635CB8DCC7697668CCEA8E65BFE1AE7AEAA72",
+  "platform": "windows-x86_64",
+  "supported_game": "WW2.7.1.0 / game1.17.1",
+  "configuration": "ERCharacterScale.toml",
+  "scope": "local player and verified hostile PlayerIns/EnemyIns, including non-c0000 models",
+  "enemies_enabled_by_default": false,
+  "scale_range": [0.5, 3.0],
+  "automatic_tests": {
+    "debug": 192,
+    "release": 192,
+    "original_executable_guard_debug": "pass including three new entry-state corruptions",
+    "original_executable_guard_release": "pass including three new entry-state corruptions",
+    "clippy_all_targets": "pass",
+    "rustfmt": "pass"
+  },
+  "regression": "Loaded local actors have ChrSetEntry bytes [4,4]; accept native active state 4 and use ChrIns role for remote filtering",
+  "human_visual_acceptance": "pending for this candidate",
+  "known_limitations": [
+    "Conflicting scale factors on shared mutable cloth resources keep connected consumers at baseline",
+    "Unknown or changed model/cloth layouts are rejected",
+    "Specific enemy models, Boss phases, grabs and executions require in-game validation"
+  ],
+  "license": "MIT",
+  "dependency_repository": "https://github.com/KamiyamaShiki0704/fromsoftware-rs",
+  "dependency_revision": "02fa5681e27fd2ecd9da79d34aef9fae96805539",
+  "git_submodules": false
+}

@@ -33,7 +33,7 @@ use fromsoftware_shared::{FromStatic, SharedTaskImpExt};
 const DLL_PROCESS_DETACH: u32 = 0;
 const DLL_PROCESS_ATTACH: u32 = 1;
 
-const BUILD_MODE: &str = "er-2.54-configurable-units-rc1";
+const BUILD_MODE: &str = "er-2.54-configurable-units-rc2";
 const ENABLE_SYNC_DIAGNOSTIC: bool = true;
 #[cfg(test)]
 const SCALE_MIN: f32 = 0.50;
@@ -387,6 +387,12 @@ fn run_task_thread(hmodule: usize) {
         ));
         return;
     }
+    if !unit_runtime::entry_state_supported(body_scale_port::image_base()) {
+        log::line(format_args!(
+            "[ERCS-UNITS] entry-state ABI rejected; no scale task registered"
+        ));
+        return;
+    }
 
     log::line(format_args!(
         "[player-scale-no-bone] waiting for upstream ER 2.7 task system"
@@ -440,15 +446,8 @@ fn run_task_thread(hmodule: usize) {
                 return;
             };
 
-            let ready = units.tick(world_chr_man, state.task_frames);
-            maybe_log_runtime_stage(
-                &mut state,
-                if ready {
-                    "local-player-ready"
-                } else {
-                    "main-player-unavailable"
-                },
-            );
+            let stage = units.tick(world_chr_man, state.task_frames).stage();
+            maybe_log_runtime_stage(&mut state, stage);
         },
         CSTaskGroupIndex::ChrIns_PrePhysics,
     );
