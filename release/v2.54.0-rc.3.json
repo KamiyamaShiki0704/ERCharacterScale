@@ -1,0 +1,37 @@
+{
+  "version": "2.54.0-rc.3",
+  "build_mode": "er-2.54-configurable-units-rc3",
+  "release_kind": "candidate; model matching and local unit classification; visual acceptance pending",
+  "artifact": "player_scale_no_bone.dll",
+  "bytes": 1623552,
+  "sha256": "346746BA22DCDCD975675457233923B6AFCB2A95D55CA7C27E5310739F478CA2",
+  "platform": "windows-x86_64",
+  "supported_game": "WW2.7.1.0 / game1.17.1",
+  "configuration": "ERCharacterScale.toml",
+  "scope": "local player and verified local non-player PlayerIns/EnemyIns; model matching includes allies and summons; hostile_only is optional",
+  "enemies_enabled_by_default": false,
+  "scale_range": [
+    0.5,
+    3.0
+  ],
+  "automatic_tests": {
+    "debug": 197,
+    "release": 197,
+    "original_executable_guard_debug": "pass including three new entry-state corruptions",
+    "original_executable_guard_release": "pass including three new entry-state corruptions",
+    "clippy_all_targets": "pass",
+    "rustfmt": "pass"
+  },
+  "regression": "Live c9520 EnemyIns role 7 in debug set reaches model rules; debug/summon aliases deduplicate; ghost/remote/mount exclusions remain",
+  "human_visual_acceptance": "pending for this candidate",
+  "known_limitations": [
+    "Conflicting scale factors on shared mutable cloth resources keep connected consumers at baseline",
+    "Unknown or changed model/cloth layouts are rejected",
+    "Specific enemy models, Boss phases, grabs and executions require in-game validation"
+  ],
+  "license": "MIT",
+  "dependency_repository": "https://github.com/KamiyamaShiki0704/fromsoftware-rs",
+  "dependency_revision": "02fa5681e27fd2ecd9da79d34aef9fae96805539",
+  "git_submodules": false,
+  "configuration_default_hostile_only": false
+}

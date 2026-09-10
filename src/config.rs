@@ -52,6 +52,8 @@ pub struct Rule {
     character_ids: Option<Vec<u32>>,
     npc_param_ids: Option<Vec<i32>>,
     entity_ids: Option<Vec<u32>>,
+    #[serde(default)]
+    hostile_only: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -99,6 +101,9 @@ impl Config {
             if !rule.scale.is_finite() || !(0.5..=3.0).contains(&rule.scale) {
                 return Err(error("scale must be finite and between 0.5 and 3.0"));
             }
+            if rule.hostile_only && rule.target == TargetKind::Player {
+                return Err(error("hostile_only=true requires target='enemy'"));
+            }
             match (rule.mode, rule.sp_effect_id) {
                 (Mode::Speffect, Some(id)) if id >= 0 => (),
                 (Mode::Constant, None) => (),
@@ -137,7 +142,17 @@ impl Config {
         Ok(parsed)
     }
 
-    pub fn resolve(&self, facts: UnitFacts, mut has_effect: impl FnMut(i32) -> bool) -> Selection {
+    #[cfg(test)]
+    pub fn resolve(&self, facts: UnitFacts, has_effect: impl FnMut(i32) -> bool) -> Selection {
+        self.resolve_with_relation(facts, has_effect, || None)
+    }
+
+    pub fn resolve_with_relation(
+        &self,
+        facts: UnitFacts,
+        mut has_effect: impl FnMut(i32) -> bool,
+        mut is_hostile: impl FnMut() -> Option<bool>,
+    ) -> Selection {
         if !self.enabled
             || !match facts.kind {
                 TargetKind::Player => self.player.enabled,
@@ -146,6 +161,7 @@ impl Config {
         {
             return Selection::default();
         }
+        let mut relation = None;
         for (index, rule) in self.rules.iter().enumerate() {
             if rule.target != facts.kind
                 || !matches(&rule.character_ids, facts.character_id)
@@ -155,6 +171,12 @@ impl Config {
                 continue;
             }
             if rule.mode == Mode::Constant || rule.sp_effect_id.is_some_and(&mut has_effect) {
+                // Ordinary model rules never depend on native team lookup.
+                // Unknown relation only skips explicitly hostile-only rules.
+                if rule.hostile_only && *relation.get_or_insert_with(&mut is_hostile) != Some(true)
+                {
+                    continue;
+                }
                 return Selection {
                     rule: Some(index),
                     scale: rule.scale,
@@ -227,6 +249,77 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optional_hostility_is_a_rule_filter_with_ordered_fallback() {
+        let c = Config::parse(&text(
+            &(rule(
+                "hostile",
+                "enemy",
+                "mode='constant'\nscale=0.6\ncharacter_ids=[1234]\nhostile_only=true",
+            ) + &rule(
+                "other",
+                "enemy",
+                "mode='constant'\nscale=0.8\ncharacter_ids=[1234]",
+            )),
+        ))
+        .unwrap();
+        for (relation, scale, index) in
+            [(Some(true), 0.6, 0), (Some(false), 0.8, 1), (None, 0.8, 1)]
+        {
+            assert_eq!(
+                c.resolve_with_relation(
+                    facts(TargetKind::Enemy, 1),
+                    |_| panic!("constant"),
+                    || relation
+                ),
+                Selection {
+                    rule: Some(index),
+                    scale
+                }
+            );
+        }
+        assert!(
+            Config::parse(&text(&rule(
+                "invalid",
+                "player",
+                "mode='constant'\nscale=0.6\nhostile_only=true"
+            )))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn model_only_rules_do_not_query_or_require_hostility() {
+        for extra in ["", "\nhostile_only=false"] {
+            let c = Config::parse(&text(&rule(
+                "model",
+                "enemy",
+                &format!("mode='constant'\nscale=0.6\ncharacter_ids=[1234]{extra}"),
+            )))
+            .unwrap();
+            assert_eq!(
+                c.resolve_with_relation(
+                    facts(TargetKind::Enemy, 1),
+                    |_| panic!("constant"),
+                    || panic!("model rule queried hostility")
+                )
+                .scale,
+                0.6
+            );
+            let mut different = facts(TargetKind::Enemy, 2);
+            different.character_id = 9521;
+            assert_eq!(
+                c.resolve_with_relation(
+                    different,
+                    |_| panic!("different model"),
+                    || panic!("different model")
+                )
+                .scale,
+                1.0
+            );
+        }
+    }
 
     #[test]
     fn shipped_examples_cover_non_c0000_without_requiring_effects() {

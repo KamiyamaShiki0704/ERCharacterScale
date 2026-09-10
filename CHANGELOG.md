@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.54.0-rc.3 — model matching and local character coverage
+
+- Include verified role-7 EnemyIns observed on debug-spawned c9520; enumerate debug and summon collections directly and deduplicate their aliases.
+- Keep the existing `enemy` target/switch names for compatibility, but match supported local non-player characters regardless of allegiance by default. Existing model rules also apply to friendly and summoned instances.
+- Add optional per-rule `hostile_only` (default false). Only true queries native hostility; false/unknown relations skip that rule and permit later rules to match. Reject true on player rules.
+- Include verified EnemyIns roles 5/6/7 and local NPC PlayerIns roles 5/19/20/21. Preserve class, owner, pose and active-entry checks, and ghost/remote-player/Torrent exclusions.
+- Add real-input role-7 regressions, collection-to-rule coverage, model mismatch controls, optional-hostility fallback checks and no-query assertions. Keep pinned Cargo dependencies and cloth algorithms unchanged.
+
 ## 2.54.0-rc.2 — loaded-character readiness fix
 
 - Fix the shared readiness gate rejecting loaded players and enemies: WW2.7.1.0 uses entry state 4, not the dependency's state-2 label.

@@ -179,15 +179,20 @@ impl Identity {
         self,
         kind: config::TargetKind,
         config: &config::Config,
+        is_hostile: impl FnMut() -> Option<bool>,
     ) -> Result<config::Selection, &'static str> {
         let facts = self.facts(kind);
         let mut effects: Option<Result<HashSet<i32>, &'static str>> = None;
-        let selected = config.resolve(facts, |id| {
-            effects
-                .get_or_insert_with(|| self.effect_ids())
-                .as_ref()
-                .is_ok_and(|effects| effects.contains(&id))
-        });
+        let selected = config.resolve_with_relation(
+            facts,
+            |id| {
+                effects
+                    .get_or_insert_with(|| self.effect_ids())
+                    .as_ref()
+                    .is_ok_and(|effects| effects.contains(&id))
+            },
+            is_hostile,
+        );
         if let Some(Err(reason)) = effects {
             return Err(reason);
         }
@@ -248,7 +253,7 @@ fn append_set_mode(
             if !include_remote
                 && !matches!(
                     read::<i32>(address + offset_of!(ChrIns, chr_type)),
-                    Some(0 | 5 | 20 | 21)
+                    Some(0 | 5 | 6 | 7 | 19 | 20 | 21)
                 )
             {
                 continue;
@@ -264,19 +269,25 @@ fn append_set_mode(
 /// c0000 NPC opponents are considered separately and retain PlayerIns layout.
 pub(crate) fn candidates(world: &WorldChrMan, local_player: usize) -> Vec<usize> {
     let base = world as *const WorldChrMan as usize;
+    candidates_at(base, local_player)
+}
+
+fn candidates_at(base: usize, local_player: usize) -> Vec<usize> {
     let mut excluded = Vec::new();
     let mut seen = HashSet::new();
-    for set in [
+    let _ = append_set_mode(
         base + offset_of!(WorldChrMan, ghost_chr_set),
-        base + offset_of!(WorldChrMan, summon_buddy_chr_set),
-    ] {
-        let _ = append_set(set, &mut excluded, &mut seen);
-    }
+        &mut excluded,
+        &mut seen,
+        true,
+    );
     seen.insert(local_player);
     let mut result = Vec::new();
     for set in [
         base + offset_of!(WorldChrMan, open_field_chr_set),
         base + offset_of!(WorldChrMan, player_chr_set),
+        base + offset_of!(WorldChrMan, debug_chr_set),
+        base + offset_of!(WorldChrMan, summon_buddy_chr_set),
     ] {
         let _ = append_set(set, &mut result, &mut seen);
     }
@@ -299,6 +310,7 @@ fn all_consumers(world: &WorldChrMan) -> Vec<usize> {
         offset_of!(WorldChrMan, summon_buddy_chr_set),
         offset_of!(WorldChrMan, open_field_chr_set),
         offset_of!(WorldChrMan, player_chr_set),
+        offset_of!(WorldChrMan, debug_chr_set),
     ] {
         let _ = append_set_mode(base + offset, &mut result, &mut seen, true);
     }
@@ -327,7 +339,7 @@ impl EnemyApi {
         Some(Self { base })
     }
     pub fn kind(&self, address: usize) -> Option<bool> {
-        // true = normal EnemyIns (including non-c0000), false = local NPC
+        // true = EnemyIns (including local debug/spirit units), false = local NPC
         // PlayerIns. Network players/phantoms and replay classes are rejected.
         memory_query::accessible_region(address, size_of::<ChrIns>(), false)?;
         let vtable = read::<usize>(address)?;
@@ -336,9 +348,9 @@ impl EnemyApi {
         if model == 8000 {
             return None;
         } // Torrent is never an enemy scaling target.
-        if vtable == self.base + cloth_owner_scope::ENEMY_VTABLE_RVA && role == 5 {
+        if vtable == self.base + cloth_owner_scope::ENEMY_VTABLE_RVA && [5, 6, 7].contains(&role) {
             Some(true)
-        } else if vtable == self.base + PLAYER_VTABLE_RVA && [5, 20, 21].contains(&role) {
+        } else if vtable == self.base + PLAYER_VTABLE_RVA && [5, 19, 20, 21].contains(&role) {
             Some(false)
         } else {
             None
@@ -451,8 +463,8 @@ impl Runtime {
         let mut pending = Vec::new();
         let mut consumers = HashMap::new();
         if self.api.is_some() {
-            // Include friendly, remote and summon consumers in read-only shared
-            // resource checks. They always request baseline and are never targets.
+            // Include even excluded consumers in read-only shared resource checks.
+            // Selected local units replace baseline with their own requested scale.
             for address in memory_query::scoped(|| all_consumers(world)) {
                 if let Some(identity) = Identity::capture(address) {
                     consumers.insert(
@@ -505,26 +517,24 @@ impl Runtime {
             } else {
                 config::TargetKind::Enemy
             };
-            let hostile = if is_player {
-                Some(true)
-            } else {
-                self.api
+            let mut relation_unavailable = false;
+            let result = identity.resolve(kind, &self.config, || {
+                let relation = self
+                    .api
                     .as_ref()
-                    .and_then(|api| api.hostile(identity, player))
-            };
-            let selection = if hostile == Some(true) {
-                match identity.resolve(kind, &self.config) {
-                    Ok(selected) => selected,
-                    Err(reason) => {
-                        self.rejected(address, reason);
-                        config::Selection::default()
-                    }
+                    .and_then(|api| api.hostile(identity, player));
+                relation_unavailable = relation.is_none();
+                relation
+            });
+            if relation_unavailable {
+                self.rejected(address, "hostile-only-rule-relation-unavailable");
+            }
+            let selection = match result {
+                Ok(selected) => selected,
+                Err(reason) => {
+                    self.rejected(address, reason);
+                    config::Selection::default()
                 }
-            } else {
-                if hostile.is_none() {
-                    self.rejected(address, "enemy-relation-unavailable");
-                }
-                config::Selection::default()
             };
             if !is_player && selection.scale == 1.0 && !self.records.contains_key(&address) {
                 continue;
@@ -580,7 +590,7 @@ impl Runtime {
                     rebind_record(record, next);
                 }
                 if read::<u8>(record.identity.entry + 8) == Some(ACTIVE_ENTRY_STATE) {
-                    // Still active but no longer eligible (for example a summon
+                    // Still active but no longer eligible (for example a remote
                     // role): restore its own baseline instead of parking it.
                     let mut record = self.records.remove(&address).expect("listed record");
                     release_record(&mut record);
@@ -761,6 +771,115 @@ mod tests {
     use crate::body_scale_port::test_characters::{BASE, Character, Environment};
 
     #[test]
+    fn model_rules_reach_debug_and_summon_sets_but_exclude_ghosts_and_remote_players() {
+        let _environment = Environment::new();
+        let debug = Character::new(9520, 1, 1.0);
+        debug.put(offset_of!(ChrIns, chr_type), 7i32);
+        let buddy = Character::new(9520, 2, 1.0);
+        buddy.put(offset_of!(ChrIns, chr_type), 6i32);
+        let friendly_npc = Character::new(0, 3, 1.0);
+        friendly_npc.put(0, BASE + PLAYER_VTABLE_RVA);
+        friendly_npc.put(offset_of!(ChrIns, chr_type), 19i32);
+        let ghost = Character::new(9520, 4, 1.0);
+        let remote = Character::new(0, 5, 1.0);
+        remote.put(0, BASE + PLAYER_VTABLE_RVA);
+        remote.put(offset_of!(ChrIns, chr_type), 1i32);
+        // Raw owned bytes exercise the actual bounded reader without constructing
+        // a fake &WorldChrMan containing invalid Rust references or enum values.
+        let mut world = vec![0u128; size_of::<WorldChrMan>().div_ceil(16)];
+        let base = world.as_mut_ptr() as usize;
+        let set = |offset: usize, actor: &Character| unsafe {
+            ((base + offset + offset_of!(ChrSet<ChrIns>, capacity)) as *mut u32).write(1);
+            ((base + offset + offset_of!(ChrSet<ChrIns>, entries)) as *mut usize)
+                .write(actor.at(0xA000));
+        };
+        set(offset_of!(WorldChrMan, debug_chr_set), &debug);
+        set(offset_of!(WorldChrMan, summon_buddy_chr_set), &buddy);
+        set(offset_of!(WorldChrMan, open_field_chr_set), &friendly_npc);
+        set(offset_of!(WorldChrMan, ghost_chr_set), &ghost);
+        set(offset_of!(WorldChrMan, player_chr_set), &remote);
+        for (i, offset) in [
+            offset_of!(WorldChrMan, debug_chr_set),
+            offset_of!(WorldChrMan, summon_buddy_chr_set),
+            offset_of!(WorldChrMan, ghost_chr_set),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            unsafe {
+                ((base + offset_of!(WorldChrMan, chr_sets) + i * 8) as *mut usize)
+                    .write(base + offset);
+            }
+        }
+        let found = candidates_at(base, 0);
+        assert_eq!(
+            found,
+            vec![friendly_npc.address, debug.address, buddy.address]
+        );
+        let api = EnemyApi { base: BASE };
+        let config = config::Config::parse("version=1\nenabled=true\n[player]\nenabled=true\n[enemies]\nenabled=true\n[[rules]]\nname='c9520'\ntarget='enemy'\ncharacter_ids=[9520]\nmode='constant'\nscale=0.6").unwrap();
+        for actor in [&debug, &buddy, &friendly_npc] {
+            assert!(api.kind(actor.address).is_some());
+            let identity = actor.identity();
+            let selected = identity
+                .resolve(config::TargetKind::Enemy, &config, || {
+                    panic!("model rule must not query teams")
+                })
+                .unwrap();
+            assert_eq!(
+                selected.scale,
+                if actor.address == friendly_npc.address {
+                    1.0
+                } else {
+                    0.6
+                }
+            );
+        }
+        assert_eq!(api.kind(remote.address), None);
+        buddy.put(offset_of!(ChrIns, character_id), 8000u32);
+        assert_eq!(api.kind(buddy.address), None);
+    }
+
+    #[test]
+    fn loaded_c9520_role_seven_reaches_candidate_enumeration() {
+        let _environment = Environment::new();
+        // Live WW2.7.1.0 c9520 in debug_chr_set (also chr_sets[133]):
+        // EnemyIns, role 7, reciprocal active entry [4,4].
+        let actor = Character::new(9520, 1, 1.0);
+        actor.put(offset_of!(ChrIns, chr_type), 7i32);
+        assert!(Identity::capture(actor.address).is_some());
+        let mut set = vec![0usize; size_of::<ChrSet<ChrIns>>().div_ceil(8)];
+        set[offset_of!(ChrSet<ChrIns>, capacity) / 8] = 1;
+        set[offset_of!(ChrSet<ChrIns>, entries) / 8] = actor.at(0xA000);
+        let mut output = Vec::new();
+        let mut seen = HashSet::new();
+        append_set(set.as_ptr() as usize, &mut output, &mut seen).unwrap();
+        assert_eq!(output, vec![actor.address]);
+        // The same entry referenced from a second collection is processed once.
+        append_set(set.as_ptr() as usize, &mut output, &mut seen).unwrap();
+        assert_eq!(output, vec![actor.address]);
+    }
+
+    #[test]
+    fn loaded_c9520_role_seven_requires_verified_enemy_class() {
+        let _environment = Environment::new();
+        let api = EnemyApi { base: BASE };
+        let actor = Character::new(9520, 1, 1.0);
+        actor.put(offset_of!(ChrIns, chr_type), 7i32);
+        assert_eq!(api.kind(actor.address), Some(true));
+        actor.put(0, BASE + PLAYER_VTABLE_RVA);
+        assert_eq!(api.kind(actor.address), None);
+        actor.put(0, BASE + cloth_owner_scope::ENEMY_VTABLE_RVA);
+        for role in [1i32, 2, 3, 4, 8, 19, 22] {
+            actor.put(offset_of!(ChrIns, chr_type), role);
+            assert_eq!(api.kind(actor.address), None);
+        }
+        actor.put(offset_of!(ChrIns, chr_type), 7i32);
+        actor.put(offset_of!(ChrIns, character_id), 8000u32);
+        assert_eq!(api.kind(actor.address), None);
+    }
+
+    #[test]
     fn loaded_player_and_enemy_with_native_entry_state_four_reach_identity_and_enumeration() {
         let _environment = Environment::new();
         // WW2.7.1.0: a loaded local player's reciprocal ChrSetEntry has
@@ -801,24 +920,23 @@ mod tests {
         let _environment = Environment::new();
         let a = Character::new(2010, 1, 1.0);
         let b = Character::new(2010, 2, 1.0);
-        let config = config::Config::parse(
-            &config::DEFAULT_TEXT
-                .replace("[enemies]\nenabled = false", "[enemies]\nenabled = true")
-                .replace("target = \"player\"", "target = \"enemy\""),
+        let mut config = config::Config::parse(
+            &config::DEFAULT_TEXT.replace("target = \"player\"", "target = \"enemy\""),
         )
         .unwrap();
+        config.enemies.enabled = true;
         a.put(0x9008, a.at(0x9100));
         a.put(0x9108, 8020400i32);
         assert_eq!(
             a.identity()
-                .resolve(config::TargetKind::Enemy, &config)
+                .resolve(config::TargetKind::Enemy, &config, || None)
                 .unwrap()
                 .scale,
             0.5
         );
         assert_eq!(
             b.identity()
-                .resolve(config::TargetKind::Enemy, &config)
+                .resolve(config::TargetKind::Enemy, &config, || None)
                 .unwrap()
                 .scale,
             1.0
@@ -826,13 +944,13 @@ mod tests {
         a.put(0x9130, a.at(0x9100));
         assert!(
             a.identity()
-                .resolve(config::TargetKind::Enemy, &config)
+                .resolve(config::TargetKind::Enemy, &config, || None)
                 .is_err()
         );
         let fixed=config::Config::parse("version=1\nenabled=true\n[player]\nenabled=true\n[enemies]\nenabled=true\n[[rules]]\nname='fixed'\ntarget='enemy'\nmode='constant'\nscale=0.75").unwrap();
         assert_eq!(
             a.identity()
-                .resolve(config::TargetKind::Enemy, &fixed)
+                .resolve(config::TargetKind::Enemy, &fixed, || None)
                 .unwrap()
                 .scale,
             0.75
@@ -840,7 +958,7 @@ mod tests {
         a.put(0x9008, usize::MAX);
         assert!(
             a.identity()
-                .resolve(config::TargetKind::Enemy, &config)
+                .resolve(config::TargetKind::Enemy, &config, || None)
                 .is_err()
         );
     }
@@ -858,11 +976,11 @@ mod tests {
         assert_eq!(api.kind(actor.address), None);
         actor.put(offset_of!(ChrIns, character_id), 0u32);
         actor.put(0, BASE + PLAYER_VTABLE_RVA);
-        for role in [5i32, 20, 21] {
+        for role in [5i32, 19, 20, 21] {
             actor.put(offset_of!(ChrIns, chr_type), role);
             assert_eq!(api.kind(actor.address), Some(false));
         }
-        actor.put(offset_of!(ChrIns, chr_type), 19i32);
+        actor.put(offset_of!(ChrIns, chr_type), 1i32);
         assert_eq!(api.kind(actor.address), None);
         assert_eq!(api.kind(usize::MAX), None);
     }

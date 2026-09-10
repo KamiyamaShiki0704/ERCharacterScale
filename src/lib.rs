@@ -33,7 +33,7 @@ use fromsoftware_shared::{FromStatic, SharedTaskImpExt};
 const DLL_PROCESS_DETACH: u32 = 0;
 const DLL_PROCESS_ATTACH: u32 = 1;
 
-const BUILD_MODE: &str = "er-2.54-configurable-units-rc2";
+const BUILD_MODE: &str = "er-2.54-configurable-units-rc3";
 const ENABLE_SYNC_DIAGNOSTIC: bool = true;
 #[cfg(test)]
 const SCALE_MIN: f32 = 0.50;

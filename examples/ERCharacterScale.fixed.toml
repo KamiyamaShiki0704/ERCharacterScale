@@ -1,3 +1,5 @@
+# rc.3: enemy rules include supported local allies/summons.
+# Add hostile_only=true to restrict a rule to hostile units.
 # No SpEffect is required. Copy this file next to the DLL and rename it
 # ERCharacterScale.toml. Includes supported non-c0000 enemy models.
 version = 1

@@ -1,5 +1,13 @@
 # Validation
 
+## 2.54.0-rc.3 model selection regression
+
+A live hostile c9520 had EnemyIns class, role 7 and active entry [4,4] in the debug collection (also referenced by chr_sets[133]). Both rc.2 enumeration and class selection rejected it. Separate regression runs reproduced each rejection before the fix.
+
+The collection regression now exercises actual bounded readers over owned raw bytes: debug and summon units are selected, duplicate collection references are processed once, ghost aliases and remote players stay excluded, and the exact model-only rule reaches identity resolution without a team query. Role-6 and role-19 cases are synthetic coverage, not in-game visual acceptance.
+
+Rules default to no allegiance restriction. Tests cover explicit hostile-only rules, false/unknown relation fallback, mismatched models and prohibition on player hostile-only rules. Game checks and human visual acceptance are recorded separately.
+
 ## 2.54.0-rc.2 readiness regression
 
 Original executable inspection and read-only loaded-character observation identified
@@ -95,5 +103,5 @@ The GitHub release preserves the accepted binary rather than replacing it with a
 new local build. ItsSHA256 is
 `F40FC6B9793A08E280C0CAD21289D1C164B31764AC7297477A71BA4C684AC00B`.
 That release's Cargo metadata and runtime identify version2.53. The candidate uses
-version2.54.0-rc.2 and is a separate binary. Locally rebuilt files need not have the
+version2.54.0-rc.3 and is a separate binary. Locally rebuilt files need not have the
 same binary hash.
