@@ -8,11 +8,11 @@ Configure the overall size of the Elden Ring player and other characters through
 
 ## Features
 
-- Configure the player and non-player characters separately, with scales from **0.5 to 3.0** relative to each character's original size.
+- Configure the player and non-player characters separately, with scales relative to each character's original size.
 - Support the local player, local c0000 NPCs, and non-c0000 character models.
 - Assign different scales by `cxxxx` model ID, NPC parameter ID, or event entity ID.
 - Check each character's own SpEffects, or apply a scale unconditionally with `constant` mode.
-- Keep cloth simulation active. The default release DLL does not write logs.
+- Keep cloth simulation active.
 
 ## Installation
 
@@ -40,12 +40,6 @@ Start with one of these complete examples, copy it beside the DLL as `ERCharacte
 - [Half-size non-player characters](examples/ERCharacterScale.enemies-half.toml): default player effect rules, with supported non-player characters fixed at 0.5.
 
 See the [full configuration guide (Chinese)](docs/CONFIGURATION.md) for filters, rule ordering, and configuration errors. The bundled TOML files include English comments.
-
-## Compatibility
-
-Player scaling, scale switching, and the c9520 test scene have been checked in-game, with normal cloth behavior. Other models, Boss phases, and special actions require individual validation.
-
-Network/remote players, ghosts, and mounts are outside the supported scope. When multiple characters share mutable cloth data but require different scales, that group stays at its original size. Unknown model layouts may also remain at their original size. Scaling does not guarantee corresponding changes to damage, movement speed, grab alignment, or every attack hitbox.
 
 ## Building from source
 
