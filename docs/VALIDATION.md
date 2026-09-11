@@ -29,7 +29,7 @@ Windows API contract: [page query](https://learn.microsoft.com/en-us/windows/win
 
 Default debug and release each pass 206 tests; diagnostics release passes 205 (the quiet-only test is excluded). All 8 optional original-PE/private cloth checks pass in debug and release. Both feature configurations pass Clippy with warnings denied; formatting and release build pass.
 
-Game performance, cloth and enemy acceptance are recorded separately.
+On 2026-09-12, the user confirmed player scaling and scale switching were smooth and cloth behaved normally. Read-only checks observed c9520 at 0.6 and the player at 1.0 when no configured effect was active. The loaded DLL matched the accepted SHA256; no new logs were created, and all 7 historical log files retained their contents and modification times. No exact FPS was measured. This acceptance covers the reported scene, not every enemy model or Boss phase.
 
 ## 2.54.0-rc.4 performance and quiet build
 
@@ -139,11 +139,12 @@ These7 tests and the1 original-executable check were also run successfully durin
 The historical test-oracle Rust helpers under `src/test_support` are project code,
 not game binaries or captured assets.
 
-## Released binary
+## Release binaries
 
-The GitHub release preserves the accepted binary rather than replacing it with a
-new local build. ItsSHA256 is
+The historical v2.53.0 release preserves its accepted binary. Its SHA256 is
 `F40FC6B9793A08E280C0CAD21289D1C164B31764AC7297477A71BA4C684AC00B`.
 That release's Cargo metadata and runtime identify version2.53. The candidate uses
-version2.54.0-rc.5 and is a separate binary. Locally rebuilt files need not have the
-same binary hash.
+version2.54.0-rc.5 and is a separate binary. Its accepted DLL SHA256 is
+`C948C8E9BEB2D10F6CEA69964CCCCE56F16F9E594C0812F6A2025DB27A8DAFD8`.
+The rc.5 release uses this exact tested DLL. Locally rebuilt files need not have
+the same binary hash.

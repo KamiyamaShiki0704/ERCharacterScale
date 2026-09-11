@@ -1,7 +1,7 @@
 {
   "version": "2.54.0-rc.5",
   "build_mode": "er-2.54-configurable-units-rc5",
-  "release_kind": "candidate; resident-memory query cost fix; game acceptance pending",
+  "release_kind": "release candidate; accepted player scaling/switching, cloth and c9520 test scene",
   "artifact": "ERCharacterScale.dll",
   "bytes": 1410048,
   "sha256": "C948C8E9BEB2D10F6CEA69964CCCCE56F16F9E594C0812F6A2025DB27A8DAFD8",
@@ -27,7 +27,7 @@
     "optional_release": 8
   },
   "regression": "Large resident-memory regions: bounded page protection checks replace full-region scanning for metadata; ownership and operation invalidation retained",
-  "human_visual_acceptance": "pending for this candidate",
+  "human_visual_acceptance": "Passed reported player scaling, scale switching and cloth scene; c9520 observed at 0.6; no exact FPS measured",
   "known_limitations": [
     "Conflicting scale factors on shared mutable cloth resources keep connected consumers at baseline",
     "Unknown or changed model/cloth layouts are rejected",
@@ -39,5 +39,7 @@
   "git_submodules": false,
   "configuration_default_hostile_only": false,
   "logging_enabled_by_default": false,
-  "build_features": []
+  "build_features": [],
+  "human_acceptance_date": "2026-09-12",
+  "quiet_game_acceptance": "No new logs; all 7 existing log files remained unchanged"
 }

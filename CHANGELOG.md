@@ -6,7 +6,7 @@
 - Use bounded `K32QueryWorkingSetEx` page checks for metadata and small buffers. Query every covered page; preserve read/write/guard checks, fresh ownership reads and invalidation at each native-operation boundary.
 - Fall back to the original `VirtualQuery` checks for nonresident or unavailable page information and large spans. Keep full region discovery for cloth field-span grouping.
 - Add large resident-heap regression through the actual pose dispatcher, plus cross-page, read-only, guard-preservation, decommit, nonresident, nested-scope, unwind and thread-isolation checks.
-- Keep `ERCharacterScale.dll`, quiet default, model rules and cloth/scale algorithms unchanged. In-game acceptance remains pending.
+- Keep `ERCharacterScale.dll`, quiet default, model rules and cloth/scale algorithms unchanged. Player scaling/switching and cloth passed the reported in-game scene on 2026-09-12; c9520 was observed at 0.6. Other models and Boss phases retain their individual validation requirements.
 
 ## 2.54.0-rc.4 — runtime cost and quiet defaults
 
