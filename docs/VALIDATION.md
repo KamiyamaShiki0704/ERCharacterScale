@@ -1,5 +1,36 @@
 # Validation
 
+## 2.54.0-rc.5 large resident-region regression
+
+The rc.4 candidate failed human performance acceptance at a reported 6 FPS, while
+its player scale remained 0.85 and it created or modified no log files. Its small
+heap fixtures did not represent the per-query cost in the game's large resident regions.
+
+Read-only external timing on four character addresses found median `VirtualQueryEx`
+costs of 28.45–171.75 us, versus 1.7–2.0 us for `K32QueryWorkingSetEx` on the same
+addresses. This includes external process/Python overhead and is not a frame timer.
+
+A 128 MiB resident fixture reproduces this cost without a game process. At 128
+iterations the old metadata check took 29,643 us and the new check 50–81 us in
+sampled runs. The actual pose dispatcher (including current identity and native
+stub) failed with the old query backend at 116,294 us and passed with the new
+backend at 792 us. The test also checks scaled output and rejects a recycled identity.
+Timing ratios are local regression signals, not predicted FPS improvements.
+
+Page validation covers every page in bounded spans, retains read/write permission
+checks and preserves guard pages. Nonresident/unknown results fall back to full
+region checks without touching pages to make them resident. Nested operations,
+unwinding, subsequent native operations and other threads never inherit old page
+permissions. Full-region queries remain for cloth allocation-span grouping.
+
+Windows API contract: [page query](https://learn.microsoft.com/en-us/windows/win32/api/psapi/nf-psapi-queryworkingsetex),
+[validity and protection bits](https://learn.microsoft.com/en-us/windows/win32/api/psapi/ns-psapi-psapi_working_set_ex_block),
+[VirtualQuery region scanning](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualquery).
+
+Default debug and release each pass 206 tests; diagnostics release passes 205 (the quiet-only test is excluded). All 8 optional original-PE/private cloth checks pass in debug and release. Both feature configurations pass Clippy with warnings denied; formatting and release build pass.
+
+Game performance, cloth and enemy acceptance are recorded separately.
+
 ## 2.54.0-rc.4 performance and quiet build
 
 - Default debug/release: 202 passed, 8 optional tests ignored. Diagnostics feature release: 201 passed, 8 ignored (quiet-output test intentionally excluded).
@@ -9,7 +40,7 @@
 - Actual preparation/application over 120 stable frames: 122 complete bindings before, 4 after; changing scale still triggers a full bind.
 - Forty restoration passes over an 8,192-particle fixture: 40 span rebuilds before, 0 after (232 us / 23 us). Existing overlapping-array and departed-consumer tests remain green.
 - Quiet default test verifies no file creation and no message formatting; an isolated actual DLL load creates no log/JSONL files. Unsupported-host smoke loading does not validate game behavior.
-- Human report on rc.3: c9520 shrinks correctly and cloth does not twitch, but play remains slow and scale changes worsen it. rc.4 game verification is pending separately.
+- Human report on rc.3: c9520 shrinks correctly and cloth does not twitch, but play remains slow and scale changes worsen it. rc.4 subsequently failed performance acceptance at a reported 6 FPS.
 
 ## 2.54.0-rc.3 model selection regression
 
@@ -67,7 +98,7 @@ executions, attack volumes and Boss transitions are not automatically validated.
 For a first test, copy `examples/ERCharacterScale.enemies-half.toml` next to the
 DLL as `ERCharacterScale.toml`. It keeps the original player mappings and applies
 0.5 to supported enemies without requiring enemy SpEffects. Record actual model,
-NpcParam and event ID from `[ERCS-UNIT]` in the ordinary log when reporting results.
+NpcParam and event ID when reporting results. Developer diagnosis can use an explicitly enabled diagnostics build; the default DLL does not write logs.
 
 ## Accepted runtime build
 
@@ -114,5 +145,5 @@ The GitHub release preserves the accepted binary rather than replacing it with a
 new local build. ItsSHA256 is
 `F40FC6B9793A08E280C0CAD21289D1C164B31764AC7297477A71BA4C684AC00B`.
 That release's Cargo metadata and runtime identify version2.53. The candidate uses
-version2.54.0-rc.4 and is a separate binary. Locally rebuilt files need not have the
+version2.54.0-rc.5 and is a separate binary. Locally rebuilt files need not have the
 same binary hash.

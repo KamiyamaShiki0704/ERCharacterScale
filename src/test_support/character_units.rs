@@ -33,12 +33,19 @@ pub(crate) struct Character {
 }
 impl Character {
     pub fn new(character_id: u32, entity: u32, native_scale: f32) -> Self {
+        Self::in_heap(character_id, entity, native_scale, 0x10000)
+    }
+    pub fn in_heap(character_id: u32, entity: u32, native_scale: f32, bytes: usize) -> Self {
         assert!(
             size_of::<ChrIns>() < 0x2000
                 && size_of::<ChrCtrl>() < 0x2000
                 && size_of::<CSChrPhysicsModule>() < 0x2000
         );
-        let heap = vec![0u128; 0x10000 / 16];
+        assert!(bytes >= 0x10000 && bytes.is_multiple_of(16));
+        let mut heap = vec![0u128; bytes / 16];
+        for index in (0..heap.len()).step_by(4096 / 16) {
+            unsafe { heap.as_mut_ptr().add(index).write_volatile(0) };
+        }
         let result = Self {
             address: heap.as_ptr() as usize,
             _heap: heap,

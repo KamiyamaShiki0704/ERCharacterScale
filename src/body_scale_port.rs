@@ -8006,7 +8006,7 @@ fn write_matrix(addr: usize, value: [f32; 16]) {
 }
 
 fn is_memory_accessible(addr: usize, len: usize, write: bool) -> bool {
-    crate::memory_query::accessible_region(addr, len, write).is_some()
+    crate::memory_query::accessible_span(addr, len, write)
 }
 
 #[cfg(test)]

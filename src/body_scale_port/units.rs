@@ -221,6 +221,55 @@ pub(super) fn affine_item(r: *mut Registers) {
 mod tests {
     use super::*;
     #[test]
+    fn pose_dispatch_in_large_resident_heap_avoids_region_walk_per_callback() {
+        use super::super::test_characters::{Character, Environment};
+        let _environment = Environment::new();
+        let actor = Character::in_heap(9520, 1, 1.0, 128 * 1024 * 1024);
+        let state = Arc::new(UnitState::default());
+        state.set_identity(actor.identity());
+        with_unit_state(&state, || {
+            assert!(bind_local_player(actor.address, 0.85).ready)
+        });
+        register_unit(&state);
+        refresh_unit_registry();
+        unsafe extern "C" fn cached_native(this: usize) -> usize {
+            this
+        }
+        let mut registers: Registers = unsafe { std::mem::zeroed() };
+        registers.rcx = actor.at(0xB000) as u64;
+        let clock = std::time::Instant::now();
+        for _ in 0..128 {
+            assert!(crate::memory_query::accessible_region(actor.address, 8, false).is_some());
+        }
+        let region_time = clock.elapsed();
+        let clock = std::time::Instant::now();
+        for _ in 0..128 {
+            assert_eq!(
+                pose(&mut registers, cached_native as *const () as usize),
+                actor.at(0xB000)
+            );
+        }
+        let callback_time = clock.elapsed();
+        println!(
+            "POSE-DISPATCH callbacks=128 region_query_us={} complete_callback_us={}",
+            region_time.as_micros(),
+            callback_time.as_micros()
+        );
+        let applied = actor.get::<[f32; 4]>(0xB200);
+        assert!((applied[0] - 1.7).abs() < 0.0001);
+        // Every invocation still checks live identity, including address reuse.
+        actor.put(8, 0x1234u64);
+        assert_eq!(with_keys(&[actor.at(0xB000)], current_scale), 1.0);
+        detach_unit(&state);
+        // The full unoptimized Rust dispatcher has debug bounds/borrow checks;
+        // enforce the tighter performance margin on the shipped release path.
+        let margin = if cfg!(debug_assertions) { 1 } else { 4 };
+        assert!(
+            callback_time * margin < region_time,
+            "complete dispatcher still scans the surrounding resident heap"
+        );
+    }
+    #[test]
     fn nested_and_unwinding_contexts_restore_their_parent() {
         let a = Arc::new(UnitState::default());
         let b = Arc::new(UnitState::default());

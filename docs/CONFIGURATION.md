@@ -1,6 +1,6 @@
 # 配置体型缩放
 
-适用于 2.54.0-rc.4。默认 DLL 名称为 `ERCharacterScale.dll`。文件是 DLL 同目录的 `ERCharacterScale.toml`，
+适用于 2.54.0-rc.5。默认 DLL 名称为 `ERCharacterScale.dll`。文件是 DLL 同目录的 `ERCharacterScale.toml`，
 使用 UTF-8 编码，可以带 BOM。启动时读取一次；修改文件后重启游戏。
 配置中的 SpEffect 获得或失去仍会在游戏运行时改变倍率。
 

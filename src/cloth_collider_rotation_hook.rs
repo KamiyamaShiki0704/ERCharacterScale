@@ -56,7 +56,7 @@ pub(crate) struct Witness {
 }
 
 fn read_array<const N: usize>(address: usize) -> Option<[f32; N]> {
-    memory_query::accessible_region(address, N.checked_mul(4)?, false)?;
+    memory_query::accessible_span(address, N.checked_mul(4)?, false).then_some(())?;
     Some(unsafe { (address as *const [f32; N]).read_unaligned() })
 }
 
@@ -75,7 +75,7 @@ fn prepare(r: &Registers, base: usize) -> Option<([Transform; 2], Witness)> {
     let child = r.rsi as usize;
     // RBP belongs to this child in the pinned Simulate caller, not another
     // invocation that happens to share a collider address.
-    memory_query::accessible_region(child.checked_add(0x18)?, 8, false)?;
+    memory_query::accessible_span(child.checked_add(0x18)?, 8, false).then_some(())?;
     if unsafe { ((child + 0x18) as *const usize).read_unaligned() } != r.rbp as usize {
         return None;
     }

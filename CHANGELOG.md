@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.54.0-rc.5 — resident-memory permission query cost
+
+- rc.4 failed in-game performance acceptance at a reported 6 FPS. Small-memory query-count tests missed the much higher per-call cost on large resident game regions.
+- Use bounded `K32QueryWorkingSetEx` page checks for metadata and small buffers. Query every covered page; preserve read/write/guard checks, fresh ownership reads and invalidation at each native-operation boundary.
+- Fall back to the original `VirtualQuery` checks for nonresident or unavailable page information and large spans. Keep full region discovery for cloth field-span grouping.
+- Add large resident-heap regression through the actual pose dispatcher, plus cross-page, read-only, guard-preservation, decommit, nonresident, nested-scope, unwind and thread-isolation checks.
+- Keep `ERCharacterScale.dll`, quiet default, model rules and cloth/scale algorithms unchanged. In-game acceptance remains pending.
+
 ## 2.54.0-rc.4 — runtime cost and quiet defaults
 
 - Name the Cargo library and delivered DLL `ERCharacterScale`; build output is `ERCharacterScale.dll`.
@@ -7,7 +15,7 @@
 - Reuse current-operation memory permissions for full consumer identity capture and subject-owned effect traversal, retaining fresh data reads and invalidation across native calls/frames.
 - Preserve the existing 60-frame binding audit cadence instead of forcing a full rebind every frame; scale changes, missing bindings and identity replacement still rebind.
 - Reuse immutable prepared cloth resource spans during restoration, preserving alias protection and departed-root checks.
-- Add deterministic OS-query, binding-cadence, restoration-scan and no-log regressions. rc.3 c9520 shrink/cloth behavior was accepted by the user; rc.4 game performance acceptance remains separate.
+- Add deterministic OS-query, binding-cadence, restoration-scan and no-log regressions. rc.3 c9520 shrink/cloth behavior was accepted by the user; rc.4 subsequently failed game performance acceptance (reported 6 FPS).
 
 ## 2.54.0-rc.3 — model matching and local character coverage
 

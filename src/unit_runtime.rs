@@ -20,7 +20,7 @@ pub(crate) fn entry_state_supported(base: usize) -> bool {
         let Some(address) = base.checked_add(*rva) else {
             return false;
         };
-        memory_query::accessible_region(address, expected.len(), false).is_some()
+        accessible(address, expected.len(), false).is_some()
             && unsafe { std::slice::from_raw_parts(address as *const u8, expected.len()) }
                 == *expected
     })
@@ -42,8 +42,12 @@ impl TickStatus {
     }
 }
 
+fn accessible(address: usize, length: usize, write: bool) -> Option<()> {
+    memory_query::accessible_span(address, length, write).then_some(())
+}
+
 pub(crate) fn read<T: Copy>(address: usize) -> Option<T> {
-    memory_query::accessible_region(address, size_of::<T>(), false)?;
+    accessible(address, size_of::<T>(), false)?;
     Some(unsafe { (address as *const T).read_unaligned() })
 }
 
@@ -74,7 +78,7 @@ impl Identity {
         Self::capture_checked(address, true)
     }
     fn capture_checked(address: usize, active: bool) -> Option<Self> {
-        memory_query::accessible_region(address, size_of::<ChrIns>(), true)?;
+        accessible(address, size_of::<ChrIns>(), true)?;
         let entry = read::<usize>(address + offset_of!(ChrIns, chr_set_entry))?;
         if read::<usize>(entry)? != address
             || (active && read::<u8>(entry + 8)? != ACTIVE_ENTRY_STATE)
@@ -83,20 +87,20 @@ impl Identity {
         }
         let control = read::<usize>(address + offset_of!(ChrIns, chr_ctrl))?;
         let modules = read::<usize>(address + offset_of!(ChrIns, modules))?;
-        memory_query::accessible_region(modules, size_of::<ChrInsModuleContainer>(), false)?;
+        accessible(modules, size_of::<ChrInsModuleContainer>(), false)?;
         let physics = read::<usize>(modules + offset_of!(ChrInsModuleContainer, physics))?;
         let effects = read::<usize>(address + offset_of!(ChrIns, special_effect))?;
-        memory_query::accessible_region(control, size_of::<ChrCtrl>(), true)?;
-        memory_query::accessible_region(physics, size_of::<CSChrPhysicsModule>(), true)?;
-        memory_query::accessible_region(effects, 0x18, false)?;
+        accessible(control, size_of::<ChrCtrl>(), true)?;
+        accessible(physics, size_of::<CSChrPhysicsModule>(), true)?;
+        accessible(effects, 0x18, false)?;
         if read::<usize>(control + offset_of!(ChrCtrl, owner))? != address
             || read::<usize>(physics + offset_of!(CSChrPhysicsModule, owner))? != address
             || read::<usize>(effects + 0x10)? != address
         {
             return None;
         }
-        memory_query::accessible_region(control, size_of::<ChrCtrl>(), true)?;
-        memory_query::accessible_region(physics, size_of::<CSChrPhysicsModule>(), true)?;
+        accessible(control, size_of::<ChrCtrl>(), true)?;
+        accessible(physics, size_of::<CSChrPhysicsModule>(), true)?;
         let model = read::<usize>(address + offset_of!(ChrIns, chr_model_ins))?;
         if model == 0 {
             return None;
@@ -147,7 +151,7 @@ impl Identity {
     }
     fn instance_marker_current(self) -> bool {
         memory_query::scoped(|| {
-            memory_query::accessible_region(self.address, size_of::<ChrIns>(), false).is_some()
+            accessible(self.address, size_of::<ChrIns>(), false).is_some()
                 && read::<u64>(self.address + offset_of!(ChrIns, field_ins_handle))
                     == Some(self.handle)
                 && read::<usize>(self.address + offset_of!(ChrIns, chr_set_entry))
@@ -210,7 +214,7 @@ impl Identity {
             if !seen.insert(node) || seen.len() > 2048 {
                 return Err("effect-list-cycle-or-capacity");
             }
-            memory_query::accessible_region(node, 0x38, false).ok_or("effect-entry-unreadable")?;
+            accessible(node, 0x38, false).ok_or("effect-entry-unreadable")?;
             result.insert(read(node + 8).ok_or("effect-entry-unreadable")?);
             node = read(node + 0x30).ok_or("effect-link-unreadable")?;
         }
@@ -227,7 +231,7 @@ fn append_set_mode(
     seen: &mut HashSet<usize>,
     include_remote: bool,
 ) -> Option<()> {
-    memory_query::accessible_region(set, size_of::<ChrSet<ChrIns>>(), false)?;
+    accessible(set, size_of::<ChrSet<ChrIns>>(), false)?;
     let capacity = read::<u32>(set + offset_of!(ChrSet<ChrIns>, capacity))? as usize;
     let entries = read::<usize>(set + offset_of!(ChrSet<ChrIns>, entries))?;
     if capacity > 8192 {
@@ -236,7 +240,7 @@ fn append_set_mode(
     if capacity == 0 {
         return Some(());
     }
-    memory_query::accessible_region(
+    accessible(
         entries,
         capacity.checked_mul(size_of::<ChrSetEntry<ChrIns>>())?,
         false,
@@ -249,7 +253,7 @@ fn append_set_mode(
         let address = read::<usize>(slot)?;
         if address != 0
             && !seen.contains(&address)
-            && memory_query::accessible_region(address, size_of::<ChrIns>(), false).is_some()
+            && accessible(address, size_of::<ChrIns>(), false).is_some()
             && read::<usize>(address + offset_of!(ChrIns, chr_set_entry)) == Some(slot)
         {
             // Filter using ChrIns::chr_type, not an unrelated entry byte.
@@ -334,7 +338,7 @@ pub(crate) struct EnemyApi {
 impl EnemyApi {
     pub fn validate(base: usize) -> Option<Self> {
         if !NATIVE_CHECKS.iter().all(|(rva, bytes)| {
-            memory_query::accessible_region(base + *rva, bytes.len(), false).is_some()
+            accessible(base + *rva, bytes.len(), false).is_some()
                 && unsafe { std::slice::from_raw_parts((base + *rva) as *const u8, bytes.len()) }
                     == *bytes
         }) {
@@ -345,7 +349,7 @@ impl EnemyApi {
     pub fn kind(&self, address: usize) -> Option<bool> {
         // true = EnemyIns (including local debug/spirit units), false = local NPC
         // PlayerIns. Network players/phantoms and replay classes are rejected.
-        memory_query::accessible_region(address, size_of::<ChrIns>(), false)?;
+        accessible(address, size_of::<ChrIns>(), false)?;
         let vtable = read::<usize>(address)?;
         let role = read::<i32>(address + offset_of!(ChrIns, chr_type))?;
         let model = read::<u32>(address + offset_of!(ChrIns, character_id))?;
@@ -538,12 +542,7 @@ impl Runtime {
                 continue;
             };
             if !enemy_layout
-                && memory_query::accessible_region(
-                    address,
-                    size_of::<eldenring::cs::PlayerIns>(),
-                    true,
-                )
-                .is_none()
+                && accessible(address, size_of::<eldenring::cs::PlayerIns>(), true).is_none()
             {
                 self.rejected(address, "player-layout-span-unavailable");
                 continue;

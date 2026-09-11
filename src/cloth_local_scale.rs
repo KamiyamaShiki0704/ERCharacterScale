@@ -1246,7 +1246,7 @@ fn write_f32(address: usize, value: f32) {
 }
 
 fn is_memory_accessible(address: usize, length: usize, write: bool) -> bool {
-    accessible_memory_region(address, length, write).is_some()
+    crate::memory_query::accessible_span(address, length, write)
 }
 
 fn accessible_memory_region(address: usize, length: usize, write: bool) -> Option<(usize, usize)> {
