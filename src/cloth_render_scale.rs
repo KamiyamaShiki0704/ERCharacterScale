@@ -130,11 +130,15 @@ fn converted(mut value: [f32; 12], scale: f32) -> Option<[f32; 12]> {
     // scale from T; its S *does* divide by root scale. The render root later
     // applies scale to both. Reconcile this asymmetric contract on the copy.
     for (i, lane) in value.iter_mut().enumerate() {
+        let original = *lane;
         *lane = if i % 4 == 3 {
             *lane / scale
         } else {
             *lane * scale
         };
+        if !crate::scale_math::representable(original, *lane) {
+            return None;
+        }
     }
     value.iter().all(|x| x.is_finite()).then_some(value)
 }
@@ -148,8 +152,7 @@ pub fn reconcile_range(
     mask: &SourceMask,
     scale: f32,
 ) -> Option<usize> {
-    if !scale.is_finite()
-        || !(0.5..=3.0).contains(&scale)
+    if !crate::scale_math::valid(scale)
         || output.len() > MAX_TRANSFORMS
         || mapping.len() > MAX_TRANSFORMS
         || start.checked_add(output.len())? > mapping.len()
@@ -205,7 +208,7 @@ mod tests {
     fn range_start_repeat_fresh_output_and_restore_are_stateless() {
         let mut mask = SourceMask::new(4).unwrap();
         mask.insert(2).unwrap();
-        for scale in [0.5, 0.5, 1., 3., 1., 0.5] {
+        for scale in [0.1, 10., 0.25, 4., 0.5, 0.5, 1., 3., 1., 0.5] {
             let mut out = [ROW; 2];
             assert_eq!(
                 reconcile_range(&mut out, &[0, 0, 2, -1], 2, &mask, scale),
@@ -234,7 +237,7 @@ mod tests {
         let saved = out;
         assert_eq!(reconcile_range(&mut out, &[2, 2], 0, &mask, 0.5), None);
         assert_eq!(out, saved);
-        for scale in [0., 0.49, 3.01, f32::NAN, f32::INFINITY] {
+        for scale in [0., -1., f32::NAN, f32::INFINITY] {
             assert_eq!(reconcile_range(&mut out, &[2, 2], 0, &mask, scale), None);
             assert_eq!(out, saved);
         }

@@ -1,3 +1,18 @@
+# Positive finite scales — rc.6
+
+The fixed scale bounds are removed throughout configuration, cached pose transitions,
+cloth dimensions, fresh mesh frames, render reconciliation and collider rotation inputs.
+The production configuration-to-body path is exercised for both player and non-player
+rules at 0.1, 10, 0.25, 4, 0.49, 3.01 and 1, including repeated cached-pose callbacks.
+Body collision and original per-unit sizes are checked independently.
+
+Numeric tests cover rejection before a batch's first write, nonzero underflow,
+wide intermediate dimension calculations, unbounded cloth sentinels, recovery after
+an invalid request, and late consumers of already scaled shared arrays. Cloth
+preflight uses four cached pairs of extrema instead of scanning all fields per frame.
+Existing ownership, cloth replay, restoration and rc.5 memory-query cost checks remain.
+In-game visual acceptance for rc.6 and the new scale range is pending.
+
 # Validation
 
 ## 2.54.0-rc.5 large resident-region regression

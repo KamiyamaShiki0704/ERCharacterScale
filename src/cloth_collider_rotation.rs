@@ -11,10 +11,7 @@ pub fn rigid_pair(
     previous: [f32; 16],
     requested: f32,
 ) -> Option<(Transform, Transform)> {
-    if !requested.is_finite()
-        || !(0.5..=3.).contains(&requested)
-        || (requested - 1.).abs() <= f32::EPSILON
-    {
+    if !crate::scale_math::valid(requested) || (requested - 1.).abs() <= f32::EPSILON {
         return None;
     }
     Some((rigid(target, requested)?, rigid(previous, requested)?))
@@ -27,13 +24,14 @@ fn rigid(mut value: [f32; 16], requested: f32) -> Option<Transform> {
     if !value.iter().all(|v| v.is_finite()) {
         return None;
     }
-    let columns: [[f32; 3]; 3] = std::array::from_fn(|i| std::array::from_fn(|j| value[i * 4 + j]));
-    let lengths = columns.map(|c| c.iter().map(|v| v * v).sum::<f32>().sqrt());
-    let unit_error = lengths.iter().map(|n| (n - 1.).abs()).fold(0., f32::max);
+    let columns: [[f64; 3]; 3] =
+        std::array::from_fn(|i| std::array::from_fn(|j| f64::from(value[i * 4 + j])));
+    let lengths = columns.map(|c| c.iter().map(|v| v * v).sum::<f64>().sqrt());
+    let unit_error = lengths.iter().map(|n| (n - 1.).abs()).fold(0., f64::max);
     let scaled_error = lengths
         .iter()
-        .map(|n| (n / requested - 1.).abs())
-        .fold(0., f32::max);
+        .map(|n| (n / f64::from(requested) - 1.).abs())
+        .fold(0., f64::max);
     // Near1.0 both tolerances can overlap. Select the closer authorized
     // candidate; unit history must not be divided a second time.
     let factor = if unit_error <= 0.002 && unit_error <= scaled_error {
@@ -45,7 +43,7 @@ fn rigid(mut value: [f32; 16], requested: f32) -> Option<Transform> {
     };
     for i in 0..3 {
         for j in i + 1..3 {
-            let dot = (0..3).map(|k| columns[i][k] * columns[j][k]).sum::<f32>();
+            let dot = (0..3).map(|k| columns[i][k] * columns[j][k]).sum::<f64>();
             if dot.abs() > 0.002 * lengths[i] * lengths[j] {
                 return None;
             }
@@ -77,7 +75,20 @@ mod tests {
 
     #[test]
     fn scaled_target_and_unit_history_become_rigid_without_moving_translation() {
-        for s in [0.5, 0.75, 0.999, 1.001, 1.5, 3.] {
+        for s in [
+            0.1,
+            0.25,
+            0.5,
+            0.75,
+            0.999,
+            1.001,
+            1.5,
+            3.,
+            4.,
+            10.,
+            f32::MIN_POSITIVE,
+            f32::MAX,
+        ] {
             let (a, b) = rigid_pair(matrix(s), matrix(1.), s).unwrap();
             assert_eq!(a.0, matrix(1.));
             assert_eq!(b.0, matrix(1.));

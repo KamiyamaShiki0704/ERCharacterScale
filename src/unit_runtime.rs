@@ -111,7 +111,7 @@ impl Identity {
             offset_of!(ChrCtrl, scale_size_z),
         ] {
             let value = read::<f32>(control + offset)?;
-            if !(value * 3.0).is_finite() || value <= 0.0 {
+            if !value.is_finite() || value <= 0.0 {
                 return None;
             }
         }
@@ -123,7 +123,7 @@ impl Identity {
             offset_of!(CSChrPhysicsModule, weight),
         ] {
             let value = read::<f32>(physics + offset)?;
-            if !(value * 3.0).is_finite() || value < 0.0 {
+            if !value.is_finite() || value < 0.0 {
                 return None;
             }
         }
@@ -596,12 +596,21 @@ impl Runtime {
             // Validate the eventual pose route before shared consumers settle
             // their scale. This publishes state only; geometry is still untouched.
             if self.api.is_some() {
-                let binding = record.prepare_binding(selection.scale);
+                let scale = if crate::character_scale_supported(
+                    unsafe { &mut *(identity.address as *mut ChrIns) },
+                    &record.state,
+                    selection.scale,
+                ) {
+                    selection.scale
+                } else {
+                    1.0
+                };
+                let binding = record.prepare_binding(scale);
                 consumers.insert(
                     address,
                     crate::cloth_local_scale::shared::Consumer {
                         identity,
-                        scale: if binding.ready { selection.scale } else { 1.0 },
+                        scale: if binding.ready { scale } else { 1.0 },
                     },
                 );
             }
@@ -1169,7 +1178,11 @@ mod tests {
         actor.put(0x2000 + offset_of!(ChrCtrl, scale_size_x), f32::NAN);
         assert!(Identity::capture(actor.address).is_none());
         actor.put(0x2000 + offset_of!(ChrCtrl, scale_size_x), f32::MAX);
-        assert!(Identity::capture(actor.address).is_none());
+        assert!(Identity::capture(actor.address).is_some());
+        let chr = unsafe { &mut *(actor.address as *mut ChrIns) };
+        let state = crate::ScaleState::default();
+        assert!(crate::character_scale_supported(chr, &state, 0.1));
+        assert!(!crate::character_scale_supported(chr, &state, 4.0));
         actor.put(0x2000 + offset_of!(ChrCtrl, scale_size_x), 1.0f32);
         actor.put(0x9010, actor.address + 16);
         assert!(Identity::capture(actor.address).is_none());

@@ -98,8 +98,8 @@ impl Config {
             if !names.insert(&rule.name) {
                 return Err(error("duplicate name"));
             }
-            if !rule.scale.is_finite() || !(0.5..=3.0).contains(&rule.scale) {
-                return Err(error("scale must be finite and between 0.5 and 3.0"));
+            if !crate::scale_math::valid(rule.scale) {
+                return Err(error("scale must be finite and greater than zero"));
             }
             if rule.hostile_only && rule.target == TargetKind::Player {
                 return Err(error("hostile_only=true requires target='enemy'"));
@@ -493,7 +493,7 @@ mod tests {
 
     #[test]
     fn invalid_values_and_unknown_fields_are_rejected() {
-        for value in ["0", "-1", "0.49", "3.01", "nan", "inf", "-inf"] {
+        for value in ["0", "-0.0", "-1", "nan", "inf", "-inf", "1e100", "1e-100"] {
             assert!(
                 Config::parse(&text(&rule(
                     "bad",
@@ -527,14 +527,25 @@ mod tests {
     }
 
     #[test]
-    fn bom_and_range_endpoints_are_valid() {
+    fn bom_and_positive_scales_outside_old_range_are_valid() {
         assert!(Config::parse(&format!("\u{feff}{DEFAULT_TEXT}")).is_ok());
-        for scale in [0.5, 3.0] {
+        for scale in [
+            0.1,
+            0.25,
+            0.49,
+            0.5,
+            3.0,
+            3.01,
+            4.0,
+            10.0,
+            f32::MIN_POSITIVE,
+            f32::MAX,
+        ] {
             assert!(
                 Config::parse(&text(&rule(
                     "endpoint",
                     "enemy",
-                    &format!("mode='constant'\nscale={scale}")
+                    &format!("mode='constant'\nscale={scale:e}")
                 )))
                 .is_ok()
             );

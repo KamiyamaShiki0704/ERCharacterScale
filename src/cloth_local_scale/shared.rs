@@ -207,6 +207,7 @@ impl Pool {
             for field in &baseline.fields {
                 canonical.entry(field.address).or_insert(*field);
             }
+            baseline.rebuild_numeric_bounds();
             let spans = resource_spans(&baseline);
             self.resources.insert(
                 root,
@@ -282,6 +283,15 @@ impl Pool {
                     previous = Some((previous_end.max(end), previous_owner));
                 }
                 _ => previous = Some((end, owner)),
+            }
+        }
+        for resource in self.resources.values() {
+            for owner in &resource.owners {
+                if !resource.baseline.supports_scale(requested[&owner.address]) {
+                    prepared
+                        .rejected
+                        .insert(owner.address, "cloth-scale-numeric-overflow-or-underflow");
+                }
             }
         }
         let mut group_scale = HashMap::new();
@@ -552,6 +562,52 @@ mod tests {
         let neutral = pool.prepare(&[consumer(1, 1.0)]);
         with_prepared(&neutral, || b.apply(1.0)).unwrap();
         assert_eq!(particles[2], 2.0);
+    }
+
+    #[test]
+    fn numeric_preflight_uses_original_shared_baselines_and_isolates_other_units() {
+        let _environment = Environment::new();
+        let mut particles = [0.0f32, 0.0, 2.0, 0.0];
+        let mut independent = [0.0f32, 0.0, 4.0, 0.0];
+        let sims = [
+            simulation(particles.as_mut_ptr() as usize),
+            simulation(particles.as_mut_ptr() as usize),
+            simulation(independent.as_mut_ptr() as usize),
+        ];
+        let chars = [
+            Character::new(9520, 1, 1.0),
+            Character::new(9520, 2, 1.0),
+            Character::new(8250, 3, 1.0),
+        ];
+        for i in 0..3 {
+            chars[i].attach_cloth(sims[i].as_ptr() as usize);
+        }
+        let consumer = |i: usize, scale| Consumer {
+            identity: chars[i].identity(),
+            scale,
+        };
+        let root = |i: usize| sims[i].as_ptr() as usize;
+        let mut pool = Pool::default();
+        let first = pool.prepare(&[consumer(0, 0.1)]);
+        let mut a = with_prepared(&first, || capture(root(0), || None)).unwrap();
+        with_prepared(&first, || a.apply(0.1)).unwrap();
+        // Root B is first captured from A's shrunken mutable array. Its numeric
+        // envelope must be rebuilt after recovering A's immutable original.
+        let large = pool.prepare(&[
+            consumer(0, f32::MAX),
+            consumer(1, f32::MAX),
+            consumer(2, 10.0),
+        ]);
+        assert!(large.rejected.contains_key(&chars[0].address));
+        assert!(large.rejected.contains_key(&chars[1].address));
+        assert!(!large.rejected.contains_key(&chars[2].address));
+        assert!(!large.objects[&root(1)].supports_scale(f32::MAX));
+        assert_eq!(particles[2], 0.2, "preflight must not write");
+        let valid = pool.prepare(&[consumer(0, 10.0), consumer(1, 10.0), consumer(2, 0.25)]);
+        assert!(valid.rejected.is_empty());
+        let mut b = with_prepared(&valid, || capture(root(1), || None)).unwrap();
+        with_prepared(&valid, || b.apply(10.0)).unwrap();
+        assert_eq!(particles[2], 20.0);
     }
 
     #[test]

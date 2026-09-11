@@ -35,6 +35,32 @@ enum DimensionPower {
     InverseSquared,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct DimensionBounds {
+    minimum_nonzero: f32,
+    maximum: f32,
+}
+
+impl DimensionBounds {
+    fn include(&mut self, value: f32, preserve_unbounded: bool) {
+        let value = value.abs();
+        if value == 0.0 || (preserve_unbounded && value >= f32::MAX * 0.5) {
+            return;
+        }
+        self.maximum = self.maximum.max(value);
+        if self.minimum_nonzero == 0.0 || value < self.minimum_nonzero {
+            self.minimum_nonzero = value;
+        }
+    }
+
+    fn supports(self, scale: f32, power: DimensionPower) -> bool {
+        self.maximum == 0.0
+            || [self.minimum_nonzero, self.maximum]
+                .into_iter()
+                .all(|value| scale_dimension_from_baseline(value, scale, power, false).is_some())
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct DimensionFieldBaseline {
     address: usize,
@@ -83,6 +109,7 @@ struct DimensionObjectBaseline {
     field_spans: Vec<FieldMemorySpan>,
     field_kinds: HashMap<usize, (DimensionPower, bool)>,
     fields: Vec<DimensionFieldBaseline>,
+    numeric_bounds: [DimensionBounds; 4],
     applied_scale_bits: u32,
     pending_scale_bits: u32,
     next_field: usize,
@@ -108,6 +135,7 @@ impl DimensionObjectBaseline {
             field_spans: Vec::new(),
             field_kinds: HashMap::new(),
             fields: Vec::new(),
+            numeric_bounds: [DimensionBounds::default(); 4],
             applied_scale_bits: 1.0f32.to_bits(),
             pending_scale_bits: 0,
             next_field: 0,
@@ -193,9 +221,10 @@ impl DimensionObjectBaseline {
         // The containing writable region was just validated or came from the
         // capture cache above, so avoid a VirtualQuery call per scalar.
         let baseline = unsafe { (address as *const f32).read_unaligned() };
-        if !dimension_baseline_supports_scale_range(baseline, power, preserve_unbounded) {
+        if !baseline.is_finite() {
             return None;
         }
+        self.numeric_bounds[power as usize].include(baseline, preserve_unbounded);
         self.fields.push(DimensionFieldBaseline {
             address,
             baseline,
@@ -303,7 +332,33 @@ impl DimensionObjectBaseline {
         true
     }
 
+    fn supports_scale(&self, scale: f32) -> bool {
+        valid_scale(scale)
+            && [
+                DimensionPower::Linear,
+                DimensionPower::Squared,
+                DimensionPower::Inverse,
+                DimensionPower::InverseSquared,
+            ]
+            .into_iter()
+            .all(|power| self.numeric_bounds[power as usize].supports(scale, power))
+    }
+
+    fn rebuild_numeric_bounds(&mut self) {
+        self.numeric_bounds = [DimensionBounds::default(); 4];
+        for field in &self.fields {
+            self.numeric_bounds[field.power as usize]
+                .include(field.baseline, field.preserve_unbounded);
+        }
+    }
+
     fn apply_budgeted(&mut self, scale: f32, maximum_fields: usize) -> Option<(usize, bool)> {
+        // A numeric rejection is request-specific, not a permanent layout failure.
+        // Check before any field is written or a pending transition is changed.
+        if !self.supports_scale(scale) {
+            return None;
+        }
+
         // A departing instance must not restore data still used at a non-neutral
         // scale by another instance. The preflight resolves all consumers first.
         if scale == 1.0 && shared::retained_by_scaled_consumer(self) {
@@ -332,11 +387,8 @@ impl DimensionObjectBaseline {
                 }
                 return None;
             }
-            // Each baseline was validated at both supported scale extrema
-            // when captured. The budgeted write below still computes each
-            // value defensively, so a separate O(all fields) formula pass at
-            // every transition would only duplicate work and extend the
-            // visible scale-change stall.
+            // Four cached extrema pairs cover every field without a second
+            // unbudgeted pass over particle arrays at each scale transition.
             self.pending_scale_bits = scale.to_bits();
         }
 
@@ -1177,27 +1229,34 @@ fn scale_dimension_from_baseline(
     if preserve_unbounded && baseline.abs() >= f32::MAX * 0.5 {
         return Some(baseline);
     }
+    if baseline == 0.0 {
+        return Some(baseline);
+    }
     let factor = match power {
         DimensionPower::Linear => scale,
         DimensionPower::Squared => scale * scale,
         DimensionPower::Inverse => scale.recip(),
         DimensionPower::InverseSquared => (scale * scale).recip(),
     };
-    let result = baseline * factor;
-    result.is_finite().then_some(result)
-}
-
-fn dimension_baseline_supports_scale_range(
-    baseline: f32,
-    power: DimensionPower,
-    preserve_unbounded: bool,
-) -> bool {
-    scale_dimension_from_baseline(baseline, 0.50, power, preserve_unbounded).is_some()
-        && scale_dimension_from_baseline(baseline, 3.00, power, preserve_unbounded).is_some()
+    let direct = baseline * factor;
+    if factor.is_normal() && crate::scale_math::representable(baseline, direct) {
+        return Some(direct);
+    }
+    // Avoid false rejection when only s*s or 1/(s*s) exceeds f32.
+    // Keep the established rounding for the ordinary finite fast path above.
+    let wide = f64::from(scale);
+    let factor = match power {
+        DimensionPower::Linear => wide,
+        DimensionPower::Squared => wide * wide,
+        DimensionPower::Inverse => wide.recip(),
+        DimensionPower::InverseSquared => (wide * wide).recip(),
+    };
+    let result = (f64::from(baseline) * factor) as f32;
+    crate::scale_math::representable(baseline, result).then_some(result)
 }
 
 fn valid_scale(scale: f32) -> bool {
-    scale.is_finite() && (0.50..=3.00).contains(&scale)
+    crate::scale_math::valid(scale)
 }
 
 fn bounded_hk_array_span(
@@ -1640,6 +1699,7 @@ mod tests {
             field_spans: Vec::new(),
             field_kinds: HashMap::new(),
             fields: Vec::new(),
+            numeric_bounds: [DimensionBounds::default(); 4],
             applied_scale_bits: 1.0f32.to_bits(),
             pending_scale_bits: 0,
             next_field: 0,
@@ -1693,6 +1753,7 @@ mod tests {
             field_spans: Vec::new(),
             field_kinds: HashMap::new(),
             fields: Vec::new(),
+            numeric_bounds: [DimensionBounds::default(); 4],
             applied_scale_bits: 1.0f32.to_bits(),
             pending_scale_bits: 0,
             next_field: 0,
@@ -1788,6 +1849,7 @@ mod tests {
             field_spans: Vec::new(),
             field_kinds: HashMap::new(),
             fields: Vec::new(),
+            numeric_bounds: [DimensionBounds::default(); 4],
             applied_scale_bits: 1.0f32.to_bits(),
             pending_scale_bits: 0,
             next_field: 0,
@@ -1841,22 +1903,78 @@ mod tests {
     }
 
     #[test]
-    fn validates_dimension_baselines_once_for_the_full_supported_range() {
-        assert!(dimension_baseline_supports_scale_range(
-            2.0,
+    fn dimension_batches_accept_wide_transitions_and_reject_before_first_write() {
+        let mut values = [2.0f32, 3.0, 4.0, 5.0, f32::MAX];
+        let original = values;
+        let powers = [
             DimensionPower::Linear,
-            false,
-        ));
-        assert!(dimension_baseline_supports_scale_range(
-            f32::MAX,
-            DimensionPower::Linear,
-            true,
-        ));
-        assert!(!dimension_baseline_supports_scale_range(
-            f32::MAX,
             DimensionPower::Squared,
-            false,
-        ));
+            DimensionPower::Inverse,
+            DimensionPower::InverseSquared,
+            DimensionPower::Linear,
+        ];
+        let mut object = empty_test_baseline(values.as_ptr() as usize);
+        for (i, power) in powers.into_iter().enumerate() {
+            object
+                .capture_field(values.as_mut_ptr() as usize + i * 4, power, i == 4)
+                .unwrap();
+        }
+        for scale in [0.1f32, 10.0, 0.25, 4.0, 1.0] {
+            assert_eq!(object.apply(scale), Some(values.len()));
+            for i in 0..4 {
+                let s = f64::from(scale);
+                let factor = match powers[i] {
+                    DimensionPower::Linear => s,
+                    DimensionPower::Squared => s * s,
+                    DimensionPower::Inverse => 1.0 / s,
+                    DimensionPower::InverseSquared => 1.0 / (s * s),
+                };
+                assert!(
+                    (f64::from(values[i]) / (f64::from(original[i]) * factor) - 1.0).abs() < 0.0001
+                );
+            }
+            assert_eq!(values[4], f32::MAX);
+        }
+        assert_eq!(values, original);
+        for extreme in [f32::MAX, f32::from_bits(1)] {
+            assert_eq!(object.apply_budgeted(extreme, 1), None);
+            assert_eq!(values, original, "no partial write on numeric failure");
+            assert_eq!(object.pending_scale_bits, 0);
+        }
+        assert_eq!(
+            object.apply(0.25),
+            Some(5),
+            "numeric failures must not latch layout rejection"
+        );
+        assert_eq!(object.apply(1.0), Some(5));
+        assert_eq!(values, original);
+    }
+
+    #[test]
+    fn dimensions_with_extreme_intermediates_use_representable_final_values() {
+        for (baseline, scale, power) in [
+            (1e-20f32, 1e20f32, DimensionPower::Squared),
+            (1e20, 1e20, DimensionPower::InverseSquared),
+            (1e-20, 1e-20, DimensionPower::InverseSquared),
+        ] {
+            let value = scale_dimension_from_baseline(baseline, scale, power, false).unwrap();
+            let s = f64::from(scale);
+            let expected = f64::from(baseline)
+                * if power == DimensionPower::Squared {
+                    s * s
+                } else {
+                    1.0 / (s * s)
+                };
+            assert!((f64::from(value) / expected - 1.0).abs() < 0.0001);
+        }
+        assert_eq!(
+            scale_dimension_from_baseline(0.0, f32::MAX, DimensionPower::Squared, false),
+            Some(0.0)
+        );
+        assert_eq!(
+            scale_dimension_from_baseline(f32::from_bits(1), 0.1, DimensionPower::Linear, false),
+            None
+        );
     }
 
     #[test]
@@ -1870,6 +1988,7 @@ mod tests {
             field_spans: Vec::new(),
             field_kinds: HashMap::new(),
             fields: Vec::new(),
+            numeric_bounds: [DimensionBounds::default(); 4],
             applied_scale_bits: 1.0f32.to_bits(),
             pending_scale_bits: 0,
             next_field: 0,
@@ -1910,6 +2029,7 @@ mod tests {
             field_spans: Vec::new(),
             field_kinds: HashMap::new(),
             fields: Vec::new(),
+            numeric_bounds: [DimensionBounds::default(); 4],
             applied_scale_bits: 1.0f32.to_bits(),
             pending_scale_bits: 0,
             next_field: 0,

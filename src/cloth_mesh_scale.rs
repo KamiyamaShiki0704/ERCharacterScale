@@ -7,11 +7,7 @@ pub const MAX_FRAMES: usize = 8192;
 /// The feature adds an external uniform body scale, so remove one factor of
 /// that scale from fresh Z only. This is not normalization of simulated bends.
 pub fn scale_area_depth(frames: &mut [[f32; 16]], scale: f32) -> Option<usize> {
-    if !scale.is_finite()
-        || !(0.5..=3.).contains(&scale)
-        || frames.is_empty()
-        || frames.len() > MAX_FRAMES
-    {
+    if !crate::scale_math::valid(scale) || frames.is_empty() || frames.len() > MAX_FRAMES {
         return None;
     }
     // Validate the ENTIRE batch first, including overflow and actual mode.
@@ -32,7 +28,7 @@ pub fn scale_area_depth(frames: &mut [[f32; 16]], scale: f32) -> Option<usize> {
         ];
         for (i, expected) in cross.iter().enumerate() {
             if !expected.is_finite()
-                || !(m[8 + i] / scale).is_finite()
+                || !crate::scale_math::representable(m[8 + i], m[8 + i] / scale)
                 || (m[8 + i] - expected).abs() > 1e-10f32.max(expected.abs() * 1e-4)
             {
                 return None;
@@ -56,8 +52,7 @@ pub fn restore_normal_length(
     stride: usize,
     scale: f32,
 ) -> Option<usize> {
-    if !scale.is_finite()
-        || !(0.5..=3.).contains(&scale)
+    if !crate::scale_math::valid(scale)
         || count == 0
         || count > MAX_FRAMES
         || ![12, 16].contains(&stride)
@@ -68,7 +63,7 @@ pub fn restore_normal_length(
     for row in bytes.chunks_exact(stride) {
         for value in row[..12].chunks_exact(4) {
             let value = f32::from_le_bytes(value.try_into().ok()?);
-            if !value.is_finite() || !(value / scale).is_finite() {
+            if !crate::scale_math::representable(value, value / scale) {
                 return None;
             }
         }
@@ -86,11 +81,7 @@ pub fn restore_normal_length(
 }
 
 pub fn scale_normal_depth(frames: &mut [[f32; 16]], scale: f32) -> Option<usize> {
-    if !scale.is_finite()
-        || !(0.5..=3.0).contains(&scale)
-        || frames.is_empty()
-        || frames.len() > MAX_FRAMES
-    {
+    if !crate::scale_math::valid(scale) || frames.is_empty() || frames.len() > MAX_FRAMES {
         return None;
     }
     // Validate the entire fresh batch before any write. The native unit-normal
@@ -103,6 +94,9 @@ pub fn scale_normal_depth(frames: &mut [[f32; 16]], scale: f32) -> Option<usize>
             || m[11] != 0.
             || m[15] != 1.
             || (norm2 != 0. && (norm2 - 1.).abs() > 0.005)
+            || m[8..11]
+                .iter()
+                .any(|v| crate::scale_math::product(*v, scale).is_none())
         {
             return None;
         }
@@ -128,7 +122,7 @@ mod tests {
     }
     #[test]
     fn area_frame_uses_inverse_scale_and_keeps_other_columns() {
-        for scale in [0.5, 1., 3.] {
+        for scale in [0.25, 0.5, 1., 3., 4., 10.] {
             let mut frame = frame();
             frame[0] = 2. * scale;
             frame[5] = 3. * scale;
@@ -159,7 +153,7 @@ mod tests {
             assert_eq!(scale_area_depth(&mut frames, 0.5), None);
             assert_eq!(frames.map(|m| m.map(f32::to_bits)), before);
         }
-        for scale in [0.49, 3.01, f32::NAN, f32::INFINITY] {
+        for scale in [0., -1., f32::NAN, f32::INFINITY] {
             assert_eq!(scale_area_depth(&mut [frame()], scale), None);
         }
         assert_eq!(scale_area_depth(&mut [], 0.5), None);
@@ -189,6 +183,22 @@ mod tests {
             assert_eq!(m.map(|r| r.map(f32::to_bits)), before);
         }
     }
+
+    #[test]
+    fn normal_depth_accepts_new_scales_and_checks_late_overflow_before_writes() {
+        for scale in [0.1f32, 0.25, 4.0, 10.0] {
+            let mut frames = [frame(), frame()];
+            assert_eq!(scale_normal_depth(&mut frames, scale), Some(2));
+            assert_eq!(frames[0][10], scale);
+        }
+        let mut frames = [frame(), frame()];
+        // Native approximate normalization allows this input, but MAX would overflow.
+        frames[1][10] = 1.001;
+        let before = frames;
+        assert_eq!(scale_normal_depth(&mut frames, f32::MAX), None);
+        assert_eq!(frames, before);
+    }
+
     #[test]
     fn neutral_degenerate_growth_and_invalid_scales() {
         let mut m = [frame()];
@@ -198,7 +208,7 @@ mod tests {
         m[0][10] = 0.;
         assert_eq!(scale_normal_depth(&mut m, 3.), Some(1));
         assert_eq!(m[0][10], 0.);
-        for s in [0., 0.49, 3.01, f32::NAN, f32::INFINITY] {
+        for s in [0., -1., f32::NAN, f32::INFINITY] {
             assert_eq!(scale_normal_depth(&mut m, s), None);
         }
         assert_eq!(scale_normal_depth(&mut [], 0.5), None);
@@ -206,7 +216,7 @@ mod tests {
     #[test]
     fn normal_restore_preserves_padding_and_baseline_magnitude() {
         for stride in [12, 16] {
-            for scale in [0.5, 1., 3.] {
+            for scale in [0.25, 0.5, 1., 3., 4., 10.] {
                 let mut raw = vec![0xFE; 2 * stride];
                 for row in raw.chunks_exact_mut(stride) {
                     for (j, n) in [0.3f32, 0.4, 0.].iter().enumerate() {

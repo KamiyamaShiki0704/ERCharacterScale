@@ -1,5 +1,5 @@
 # ERCharacterScale — UTF-8 TOML. Edit before starting the game.
-# Scale is relative to each unit's original size; supported range: 0.5 .. 3.0.
+# Scale is relative to each unit's original size; use a finite number greater than zero.
 # First complete matching rule wins. Rules never multiply each other.
 # target="enemy" matches supported local non-player units, including allies/summons.
 # Add hostile_only=true to an enemy rule only when allegiance should restrict it.

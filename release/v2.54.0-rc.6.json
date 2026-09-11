@@ -1,0 +1,34 @@
+{
+  "version": "2.54.0-rc.6",
+  "build_mode": "er-2.54-configurable-units-rc6",
+  "artifact": "ERCharacterScale.dll",
+  "bytes": 1416704,
+  "sha256": "03591A30228D30570D3C0F02D9FD9A2BEA22023E6AC2A848972DF6B90A92E839",
+  "platform": "windows-x86_64",
+  "supported_game": "WW2.7.1.0 / game1.17.1",
+  "configuration": "ERCharacterScale.toml",
+  "scale_validation": "finite f32 greater than zero; no fixed minimum or maximum",
+  "numeric_writes": "reject unrepresentable derived dimensions; never clamp the requested scale",
+  "build_features": [],
+  "logging_enabled_by_default": false,
+  "automatic_tests": {
+    "debug": 208,
+    "release": 208,
+    "diagnostics_release": 207,
+    "optional_debug": 8,
+    "optional_release": 8,
+    "clippy_default_and_diagnostics": "pass",
+    "rustfmt": "pass",
+    "quiet_dll_load": "pass; no new files in isolated unsupported host"
+  },
+  "human_visual_acceptance": "Pending for rc.6 and the extended scale range; prior rc.5 acceptance is retained separately",
+  "license": "MIT",
+  "dependency_repository": "https://github.com/KamiyamaShiki0704/fromsoftware-rs",
+  "dependency_revision": "02fa5681e27fd2ecd9da79d34aef9fae96805539",
+  "git_submodules": false,
+  "known_limitations": [
+    "Conflicting scales on shared mutable cloth resources keep connected consumers at baseline",
+    "Numerically unrepresentable dimensions and unverified layouts are rejected",
+    "Extreme-scale engine behavior and individual models require game validation"
+  ]
+}

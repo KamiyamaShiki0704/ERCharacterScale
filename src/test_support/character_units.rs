@@ -266,3 +266,80 @@ fn non_c0000_cloth_reaches_the_253_rotation_fix_and_rejects_recycled_identity() 
     assert_eq!(with_collider_unit(chr.at(0xDD00), current_scale), 1.0);
     unregister_unit(&state);
 }
+
+#[test]
+fn configured_small_and_large_scales_reach_body_collision_and_cached_pose() {
+    let _environment = Environment::new();
+    for (model, target, kind) in [
+        (0, "player", crate::config::TargetKind::Player),
+        (8250, "enemy", crate::config::TargetKind::Enemy),
+    ] {
+        let actor = Character::new(model, model + 1, 2.0);
+        let hooks = Arc::new(UnitState::default());
+        hooks.set_identity(actor.identity());
+        register_unit(&hooks);
+        let mut state = crate::ScaleState::default();
+        for scale in [0.1f32, 10.0, 0.25, 4.0, 0.49, 3.01, 1.0] {
+            let config = crate::config::Config::parse(&format!("version=1\nenabled=true\n[player]\nenabled=true\n[enemies]\nenabled=true\n[[rules]]\nname='wide'\ntarget='{target}'\ncharacter_ids=[{model}]\nmode='constant'\nscale={scale:e}")).unwrap();
+            let selected = actor
+                .identity()
+                .resolve(kind, &config, || panic!("model rule queries no team"))
+                .unwrap();
+            assert_eq!(selected.scale, scale);
+            with_unit_state(&hooks, || {
+                assert_eq!(
+                    crate::apply_character_scale(
+                        unsafe { &mut *(actor.address as *mut ChrIns) },
+                        &mut state,
+                        selected.scale
+                    ),
+                    scale
+                );
+            });
+            refresh_unit_registry();
+            for _ in 0..3 {
+                let mut r: Registers = unsafe { std::mem::zeroed() };
+                r.rcx = actor.at(0xB000) as u64;
+                units::pose(&mut r, cached_pose as *const () as usize);
+                let actual: f32 = actor.get(0xB200);
+                assert!(
+                    (actual / (2.0 * scale) - 1.0).abs() < 0.0001,
+                    "model={model} scale={scale} actual={actual}"
+                );
+            }
+            assert_eq!(
+                actor.get::<f32>(0x2000 + offset_of!(ChrCtrl, scale_size_x)),
+                2.0 * scale
+            );
+            assert_eq!(
+                actor.get::<f32>(0x6000 + offset_of!(CSChrPhysicsModule, hit_height)),
+                4.0 * scale
+            );
+            assert_eq!(
+                actor.get::<f32>(0x6000 + offset_of!(CSChrPhysicsModule, weight)),
+                4.0
+            );
+        }
+        // Overflow is rejected before any non-neutral target is published.
+        with_unit_state(&hooks, || {
+            assert_eq!(
+                crate::apply_character_scale(
+                    unsafe { &mut *(actor.address as *mut ChrIns) },
+                    &mut state,
+                    f32::MAX
+                ),
+                1.0
+            );
+            assert_eq!(current_scale(), 1.0);
+        });
+        assert_eq!(
+            actor.get::<f32>(0x2000 + offset_of!(ChrCtrl, scale_size_x)),
+            2.0
+        );
+        assert_eq!(
+            actor.get::<f32>(0x6000 + offset_of!(CSChrPhysicsModule, hit_height)),
+            4.0
+        );
+        unregister_unit(&hooks);
+    }
+}

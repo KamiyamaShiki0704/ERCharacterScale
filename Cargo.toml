@@ -1,6 +1,6 @@
 [package]
 name = "player-scale-no-bone"
-version = "2.54.0-rc.5"
+version = "2.54.0-rc.6"
 edition = "2024"
 publish = false
 license = "MIT"

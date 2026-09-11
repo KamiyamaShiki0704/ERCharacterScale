@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.54.0-rc.6 — positive finite scales
+
+- Remove the fixed 0.5–3.0 scale restriction from configuration, body pose transitions and cloth routes. Player and model-specific non-player rules accept any positive finite f32 scale.
+- Check derived body dimensions before publishing the requested scale. Preflight cloth dimension batches using cached extrema, preserving budgeted updates and shared original baselines.
+- Preserve numeric overflow/underflow rejection and use wider intermediate math where necessary; do not clamp requested values.
+- Add small/large scale, cached-pose transition, shared-cloth and partial-write regression cases. Game visual acceptance for the new scale range is pending.
+- Simplify both language READMEs by removing the compatibility section and the scale-range and default-log feature descriptions.
+
 ## 2.54.0-rc.5 — resident-memory permission query cost
 
 - rc.4 failed in-game performance acceptance at a reported 6 FPS. Small-memory query-count tests missed the much higher per-call cost on large resident game regions.

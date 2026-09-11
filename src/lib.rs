@@ -27,6 +27,7 @@ mod model_matrix_scale;
 mod nr_probe;
 mod ragdoll_motion_scale;
 mod ragdoll_shape_scale;
+mod scale_math;
 mod unit_runtime;
 
 use eldenring::{
@@ -38,12 +39,8 @@ use fromsoftware_shared::{FromStatic, SharedTaskImpExt};
 const DLL_PROCESS_DETACH: u32 = 0;
 const DLL_PROCESS_ATTACH: u32 = 1;
 
-const BUILD_MODE: &str = "er-2.54-configurable-units-rc5";
+const BUILD_MODE: &str = "er-2.54-configurable-units-rc6";
 const ENABLE_SYNC_DIAGNOSTIC: bool = log::ENABLED;
-#[cfg(test)]
-const SCALE_MIN: f32 = 0.50;
-#[cfg(test)]
-const SCALE_MAX: f32 = 3.0;
 const SCALE_COLLISION: bool = true;
 const SCALE_WEIGHT: bool = false;
 const SCALE_HKNP_CAPSULE_SHAPE: bool = false;
@@ -599,6 +596,12 @@ fn apply_character_scale(chr: &mut ChrIns, state: &mut ScaleState, requested_sca
         state.matrix_candidate_hits = [0; 16];
     }
 
+    // Check both body buffers before publishing a scale to any pose hook.
+    let requested_scale = if character_scale_supported(chr, state, requested_scale) {
+        requested_scale
+    } else {
+        1.0
+    };
     let chr_ins_addr = chr as *const ChrIns as usize;
     let bind_started = Instant::now();
     let bind_queries_before = memory_query::query_count();
@@ -1531,13 +1534,34 @@ fn maybe_log_matrix_candidates(target_anim_skeleton: usize, state: &mut ScaleSta
     }
 }
 
-#[cfg(test)]
-fn clamp_scale(scale: f32) -> f32 {
-    if scale.is_finite() {
-        scale.clamp(SCALE_MIN, SCALE_MAX)
-    } else {
-        1.0
+fn character_scale_supported(chr: &mut ChrIns, state: &ScaleState, scale: f32) -> bool {
+    if !scale_math::valid(scale) {
+        return false;
     }
+    let ctrl = chr.chr_ctrl.as_mut();
+    let visual =
+        state
+            .visual_baseline
+            .unwrap_or([ctrl.scale_size_x, ctrl.scale_size_y, ctrl.scale_size_z]);
+    if !visual
+        .iter()
+        .all(|v| *v > 0.0 && scale_math::product(*v, scale).is_some())
+    {
+        return false;
+    }
+    let physics = state
+        .baseline
+        .unwrap_or_else(|| PhysicsBaseline::capture(chr.modules.as_mut().physics.as_mut()));
+    (!SCALE_COLLISION
+        || [
+            physics.chr_hit_height,
+            physics.chr_hit_radius,
+            physics.hit_height,
+            physics.hit_radius,
+        ]
+        .iter()
+        .all(|v| *v >= 0.0 && scale_math::product(*v, scale).is_some()))
+        && (!SCALE_WEIGHT || scale_math::product(physics.weight, scale).is_some())
 }
 
 fn apply_visual_scale(chr: &mut ChrIns, state: &mut ScaleState, scale: f32) {
@@ -1784,19 +1808,6 @@ fn read_chr_ctrl_hkx_roots(player: &mut PlayerIns) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn clamps_bad_scale_to_default() {
-        assert_eq!(clamp_scale(f32::NAN), 1.0);
-        assert_eq!(clamp_scale(f32::INFINITY), 1.0);
-    }
-
-    #[test]
-    fn clamps_scale_range() {
-        assert_eq!(clamp_scale(0.1), SCALE_MIN);
-        assert_eq!(clamp_scale(4.0), SCALE_MAX);
-        assert_eq!(clamp_scale(1.2), 1.2);
-    }
 
     #[test]
     fn scale_effects_use_first_configured_match_without_compounding() {

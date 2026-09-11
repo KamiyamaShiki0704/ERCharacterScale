@@ -7444,10 +7444,7 @@ fn scaled_translation(mut value: [f32; 4], scale: f32) -> Option<[f32; 4]> {
         return None;
     }
     for component in &mut value[..3] {
-        *component *= scale;
-        if !component.is_finite() {
-            return None;
-        }
+        *component = crate::scale_math::product(*component, scale)?;
     }
     Some(value)
 }
@@ -7470,10 +7467,7 @@ fn scaled_row_matrix(mut value: [f32; 16], scale: f32) -> Option<[f32; 16]> {
     for row in 0..4 {
         for column in 0..3 {
             let component = &mut value[row * 4 + column];
-            *component *= scale;
-            if !component.is_finite() {
-                return None;
-            }
+            *component = crate::scale_math::product(*component, scale)?;
         }
     }
     Some(value)
@@ -7484,10 +7478,7 @@ fn scaled_affine_matrix(mut value: [f32; 12], scale: f32) -> Option<[f32; 12]> {
         return None;
     }
     for component in &mut value {
-        *component *= scale;
-        if !component.is_finite() {
-            return None;
-        }
+        *component = crate::scale_math::product(*component, scale)?;
     }
     Some(value)
 }
@@ -7891,7 +7882,7 @@ fn mark_secondary_reference_dirty(owner: usize) -> bool {
 }
 
 fn valid_scale(scale: f32) -> bool {
-    scale.is_finite() && (0.50..=3.00).contains(&scale)
+    crate::scale_math::valid(scale)
 }
 
 fn valid_active_scale(scale: f32) -> bool {
@@ -7937,11 +7928,7 @@ fn plan_pose_scale(
 }
 
 fn valid_pose_scale_ratio(ratio: f32) -> bool {
-    const MIN_RATIO: f32 = 0.5 / 3.0;
-    const MAX_RATIO: f32 = 3.0 / 0.5;
-    ratio.is_finite()
-        && (MIN_RATIO..=MAX_RATIO).contains(&ratio)
-        && (ratio - 1.0).abs() > f32::EPSILON
+    crate::scale_math::valid(ratio) && (ratio - 1.0).abs() > f32::EPSILON
 }
 
 fn module_base(module: HMODULE) -> usize {
@@ -10218,11 +10205,13 @@ mod tests {
     }
 
     #[test]
-    fn validates_confirmed_scale_range() {
+    fn validates_positive_finite_scale() {
         assert!(valid_scale(0.5));
         assert!(valid_scale(3.0));
-        assert!(!valid_scale(0.49));
-        assert!(!valid_scale(3.01));
+        assert!(valid_scale(0.49));
+        assert!(valid_scale(3.01));
+        assert!(!valid_scale(0.0));
+        assert!(!valid_scale(-1.0));
         assert!(!valid_scale(f32::NAN));
     }
 
