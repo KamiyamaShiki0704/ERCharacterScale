@@ -2,8 +2,8 @@
 
 Elden Ring 玩家与敌人体型缩放 DLL，通过 TOML 配置效果触发或无条件倍率。
 
-当前源码为 **2.54.0-rc.3 候选版本**，运行标识为 `er-2.54-configurable-units-rc3`。
-rc.3 修正了调试生成的 c9520 被类型筛选排除的问题，并改为默认按模型等筛选匹配本地非玩家单位；敌对关系可通过 `hostile_only = true` 单独要求。保留 rc.2 的已加载单位就绪修复。
+当前源码为 **2.54.0-rc.4 候选版本**，运行标识为 `er-2.54-configurable-units-rc4`。
+rc.4 优化持续更新和体型切换的重复检查，默认构建关闭日志与诊断采集。保留已实测 c9520 缩小正常、布料无抽动的 rc.3 模型匹配行为；本版性能和外观仍需游戏验收。
 配置和多单位数值检查已自动验证，游戏中的敌人外观及动作仍待实测。
 已发布稳定版 **2.53.0** 已在 **BD9004、0.5 倍缩放**场景完成验收，继续保留用于对照。
 
@@ -24,9 +24,9 @@ rc.3 修正了调试生成的 c9520 被类型筛选排除的问题，并改为�
 
 ## 使用
 
-把候选包的 `player_scale_no_bone.dll` 和 `ERCharacterScale.toml` 放在同一目录，
+把候选包的 `ERCharacterScale.dll` 和 `ERCharacterScale.toml` 放在同一目录，
 让现有 DLL 加载器加载 DLL。修改配置后重启游戏生效。配置缺失时自动生成兼容默认文件；
-错误配置会禁用该次启动的缩放，并在同目录日志中写明原因。
+错误配置会禁用该次启动的缩放；排查配置错误时可使用下文的诊断构建。
 
 默认配置保留下面的玩家 SpEffect 映射，**敌人缩放默认关闭**。
 要直接测试非 c0000 敌人，使用包内 `examples/ERCharacterScale.enemies-half.toml`
@@ -60,9 +60,9 @@ rc.3 修正了调试生成的 c9520 被类型筛选排除的问题，并改为�
 | `8020400` | 0.50 |
 | `8020401` | 3.00 |
 
-普通日志写入 DLL 同目录，`[ERCS-UNIT]` 记录单位模型、NpcParam、实体、命中规则和
-请求/实际倍率；`[ERCS-ENEMIES]` 记录敌人路线检查结果。已有玩家一次性 JSONL
-诊断保留，采样结束不影响规则继续生效；它不能替代敌人的游戏验收。
+默认构建不创建或写入 `.log` / `.jsonl`，也不安装一次性诊断采集。已有日志文件保持原样。
+开发排查时可单独执行 `cargo build --release --locked --features diagnostics`，该构建会输出
+`ERCharacterScale.log` 和按需生成的 `ERCharacterScale_diag_*.jsonl`。普通发布使用不带此 feature 的命令。
 
 ## 从源码构建
 
@@ -78,7 +78,7 @@ cd ERCharacterScale
 cargo build --release --locked
 ```
 
-输出为 `target/release/player_scale_no_bone.dll`。仓库不是fsrs工作区的子项目，
+输出为 `target/release/ERCharacterScale.dll`。仓库不是fsrs工作区的子项目，
 没有Git子模块，也不包含fsrs源码。Cargo自行获取以下固定提交：
 
 ```toml

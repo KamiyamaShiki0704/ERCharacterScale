@@ -1,11 +1,15 @@
 [package]
 name = "player-scale-no-bone"
-version = "2.54.0-rc.3"
+version = "2.54.0-rc.4"
 edition = "2024"
 publish = false
 license = "MIT"
 description = "Configurable player and enemy scaling with coherent cloth and collision for Elden Ring"
 repository = "https://github.com/KamiyamaShiki0704/ERCharacterScale"
+
+[features]
+default = []
+diagnostics = []
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -21,4 +25,5 @@ windows = { version = "0.61", features = [
 ] }
 
 [lib]
+name = "ERCharacterScale"
 crate-type = ["cdylib"]

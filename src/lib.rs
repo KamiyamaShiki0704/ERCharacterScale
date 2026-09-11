@@ -1,3 +1,8 @@
+#![allow(
+    non_snake_case,
+    reason = "The Windows DLL target is named ERCharacterScale"
+)]
+
 use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
@@ -33,8 +38,8 @@ use fromsoftware_shared::{FromStatic, SharedTaskImpExt};
 const DLL_PROCESS_DETACH: u32 = 0;
 const DLL_PROCESS_ATTACH: u32 = 1;
 
-const BUILD_MODE: &str = "er-2.54-configurable-units-rc3";
-const ENABLE_SYNC_DIAGNOSTIC: bool = true;
+const BUILD_MODE: &str = "er-2.54-configurable-units-rc4";
+const ENABLE_SYNC_DIAGNOSTIC: bool = log::ENABLED;
 #[cfg(test)]
 const SCALE_MIN: f32 = 0.50;
 #[cfg(test)]
@@ -330,7 +335,9 @@ fn run_task_thread(hmodule: usize) {
     let exe_path_lower = exe_path.to_ascii_lowercase();
 
     if exe_path_lower.contains("nightreign.exe") {
-        run_nightreign_readonly_probe(&exe_path);
+        if log::ENABLED {
+            run_nightreign_readonly_probe(&exe_path);
+        }
         return;
     }
 
@@ -862,6 +869,9 @@ fn maybe_log_body_scale_port_state(
     binding: body_scale_port::TargetBinding,
     state: &mut ScaleState,
 ) {
+    if !log::ENABLED {
+        return;
+    }
     let counters = body_scale_port::counters();
     state.port_status_frames = state.port_status_frames.wrapping_add(1);
     let changed = binding.ready != state.last_port_ready

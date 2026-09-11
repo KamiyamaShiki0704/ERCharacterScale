@@ -199,6 +199,10 @@ impl Identity {
         Ok(selected)
     }
     fn effect_ids(self) -> Result<HashSet<i32>, &'static str> {
+        memory_query::scoped(|| self.effect_ids_inner())
+    }
+
+    fn effect_ids_inner(self) -> Result<HashSet<i32>, &'static str> {
         let mut result = HashSet::new();
         let mut seen = HashSet::new();
         let mut node = read::<usize>(self.effects + 8).ok_or("effect-list-unreadable")?;
@@ -393,7 +397,49 @@ pub(crate) struct UnitRecord {
     pub hooks: Arc<body_scale_port::UnitState>,
     pub seen: u64,
 }
+
+fn baseline_consumers(
+    addresses: Vec<usize>,
+) -> HashMap<usize, crate::cloth_local_scale::shared::Consumer> {
+    let mut consumers = HashMap::new();
+    for address in addresses {
+        if let Some(identity) = memory_query::scoped(|| Identity::capture(address)) {
+            consumers.insert(
+                address,
+                crate::cloth_local_scale::shared::Consumer {
+                    identity,
+                    scale: 1.0,
+                },
+            );
+        }
+    }
+    consumers
+}
 impl UnitRecord {
+    fn prepare_binding(&mut self, scale: f32) -> body_scale_port::TargetBinding {
+        if !crate::should_audit_body_scale_binding(
+            self.state
+                .cached_binding
+                .is_some_and(|binding| binding.ready),
+            self.state.binding_audit_frames.saturating_add(1),
+        ) && self
+            .state
+            .last_selection
+            .is_some_and(|selection| selection.scale == scale)
+            && body_scale_port::with_unit_state(&self.hooks, || {
+                body_scale_port::publish_target_scale(scale)
+            })
+        {
+            return self.state.cached_binding.expect("ready binding checked");
+        }
+        let binding = body_scale_port::with_unit_state(&self.hooks, || {
+            body_scale_port::bind_local_player(self.identity.address, scale)
+        });
+        self.state.cached_binding = Some(binding);
+        self.state.binding_audit_frames = 0;
+        binding
+    }
+
     pub fn new(identity: Identity, frame: u64) -> Self {
         let hooks = Arc::new(body_scale_port::UnitState::default());
         hooks.set_identity(identity);
@@ -465,17 +511,7 @@ impl Runtime {
         if self.api.is_some() {
             // Include even excluded consumers in read-only shared resource checks.
             // Selected local units replace baseline with their own requested scale.
-            for address in memory_query::scoped(|| all_consumers(world)) {
-                if let Some(identity) = Identity::capture(address) {
-                    consumers.insert(
-                        address,
-                        crate::cloth_local_scale::shared::Consumer {
-                            identity,
-                            scale: 1.0,
-                        },
-                    );
-                }
-            }
+            consumers = baseline_consumers(memory_query::scoped(|| all_consumers(world)));
         }
         consumers.insert(
             player_address,
@@ -561,10 +597,7 @@ impl Runtime {
             // Validate the eventual pose route before shared consumers settle
             // their scale. This publishes state only; geometry is still untouched.
             if self.api.is_some() {
-                let binding = body_scale_port::with_unit_state(&record.hooks, || {
-                    body_scale_port::bind_local_player(address, selection.scale)
-                });
-                record.state.cached_binding = Some(binding);
+                let binding = record.prepare_binding(selection.scale);
                 consumers.insert(
                     address,
                     crate::cloth_local_scale::shared::Consumer {
@@ -769,6 +802,102 @@ include!("unit_native_checks.rs");
 mod tests {
     use super::*;
     use crate::body_scale_port::test_characters::{BASE, Character, Environment};
+
+    #[test]
+    fn stable_units_keep_binding_audit_cadence_and_rebind_on_scale_changes() {
+        let _environment = Environment::new();
+        let actor = Character::new(9520, 1, 1.0);
+        let mut record = UnitRecord::new(actor.identity(), 0);
+        let before = body_scale_port::binding_call_count();
+        let clock = std::time::Instant::now();
+        for frame in 1..=120 {
+            record.state.task_frames = frame;
+            assert!(record.prepare_binding(0.6).ready);
+            body_scale_port::with_unit_state(&record.hooks, || {
+                assert_eq!(
+                    crate::apply_character_scale(
+                        unsafe { &mut *(actor.address as *mut ChrIns) },
+                        &mut record.state,
+                        0.6
+                    ),
+                    0.6
+                );
+            });
+            record.state.last_selection = Some(config::Selection {
+                rule: Some(0),
+                scale: 0.6,
+            });
+        }
+        let calls = body_scale_port::binding_call_count() - before;
+        println!(
+            "UNIT-BINDING frames=120 calls={calls} elapsed_us={}",
+            clock.elapsed().as_micros()
+        );
+        body_scale_port::unregister_unit(&record.hooks);
+        assert!(
+            calls <= 5,
+            "full binding overrides existing audit cadence: {calls}"
+        );
+        let before = body_scale_port::binding_call_count();
+        assert!(record.prepare_binding(0.85).ready);
+        assert_eq!(body_scale_port::binding_call_count() - before, 1);
+        body_scale_port::unregister_unit(&record.hooks);
+    }
+
+    #[test]
+    fn baseline_consumer_capture_has_bounded_os_query_cost() {
+        let _environment = Environment::new();
+        let actors: Vec<_> = (0..128).map(|i| Character::new(9520, i + 1, 1.0)).collect();
+        let before = memory_query::query_count();
+        let clock = std::time::Instant::now();
+        let consumers = baseline_consumers(actors.iter().map(|a| a.address).collect());
+        let queries = memory_query::query_count() - before;
+        println!(
+            "BASELINE-CONSUMERS units={} queries={} elapsed_us={}",
+            actors.len(),
+            queries,
+            clock.elapsed().as_micros()
+        );
+        assert_eq!(consumers.len(), actors.len());
+        assert!(
+            queries <= actors.len() as u64 * 8,
+            "per-field OS queries on every frame: {queries}"
+        );
+    }
+
+    #[test]
+    fn own_effect_list_has_bounded_os_query_cost() {
+        let _environment = Environment::new();
+        let actor = Character::new(0, 1, 1.0);
+        let identity = actor.identity();
+        actor.put(0x9008, actor.at(0x3000));
+        for i in 0..80 {
+            actor.put(0x3008 + i * 0x40, 880000 + i as i32);
+            actor.put(
+                0x3030 + i * 0x40,
+                if i == 79 {
+                    0
+                } else {
+                    actor.at(0x3040 + i * 0x40)
+                },
+            );
+        }
+        let before = memory_query::query_count();
+        let clock = std::time::Instant::now();
+        let ids = identity.effect_ids().unwrap();
+        let queries = memory_query::query_count() - before;
+        println!(
+            "UNIT-EFFECTS effects={} queries={} elapsed_us={}",
+            ids.len(),
+            queries,
+            clock.elapsed().as_micros()
+        );
+        assert_eq!(ids.len(), 80);
+        assert!(
+            queries <= 8,
+            "per-node OS queries on every frame: {queries}"
+        );
+    }
 
     #[test]
     fn model_rules_reach_debug_and_summon_sets_but_exclude_ghosts_and_remote_players() {

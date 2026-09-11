@@ -106,9 +106,13 @@ fn prepare(r: &Registers, base: usize) -> Option<([Transform; 2], Witness)> {
 }
 
 fn invoke(r: &Registers, original: usize, prepared: Option<([Transform; 2], Witness)>) {
-    let token = prepared
-        .as_ref()
-        .and_then(|(_, w)| cloth_diagnostic::collider_velocity_begin(r.rsi as usize, *w));
+    let token = if crate::ENABLE_SYNC_DIAGNOSTIC {
+        prepared
+            .as_ref()
+            .and_then(|(_, w)| cloth_diagnostic::collider_velocity_begin(r.rsi as usize, *w))
+    } else {
+        None
+    };
     let (target, previous) = match prepared.as_ref().filter(|(_, w)| w.applied) {
         Some((pair, _)) => (pair[0].0.as_ptr() as usize, pair[1].0.as_ptr() as usize),
         None => (r.rdx as usize, r.r8 as usize),

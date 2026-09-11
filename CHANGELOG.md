@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.54.0-rc.4 — runtime cost and quiet defaults
+
+- Name the Cargo library and delivered DLL `ERCharacterScale`; build output is `ERCharacterScale.dll`.
+- Disable log file creation, message formatting and one-shot diagnostics by default. The opt-in `diagnostics` Cargo feature retains developer evidence collection.
+- Reuse current-operation memory permissions for full consumer identity capture and subject-owned effect traversal, retaining fresh data reads and invalidation across native calls/frames.
+- Preserve the existing 60-frame binding audit cadence instead of forcing a full rebind every frame; scale changes, missing bindings and identity replacement still rebind.
+- Reuse immutable prepared cloth resource spans during restoration, preserving alias protection and departed-root checks.
+- Add deterministic OS-query, binding-cadence, restoration-scan and no-log regressions. rc.3 c9520 shrink/cloth behavior was accepted by the user; rc.4 game performance acceptance remains separate.
+
 ## 2.54.0-rc.3 — model matching and local character coverage
 
 - Include verified role-7 EnemyIns observed on debug-spawned c9520; enumerate debug and summon collections directly and deduplicate their aliases.

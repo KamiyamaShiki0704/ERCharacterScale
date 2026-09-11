@@ -1924,7 +1924,7 @@ pub(crate) fn install(base: usize) {
         .unwrap_or_default()
         .as_millis();
     let name = format!(
-        "player_scale_no_bone_diag_2_54_rc3_{}_{stamp}.jsonl",
+        "ERCharacterScale_diag_2_54_rc4_{}_{stamp}.jsonl",
         std::process::id()
     );
     let Some(path) = crate::log::sibling_path(&name) else {

@@ -1093,7 +1093,16 @@ pub fn install() -> bool {
     true
 }
 
+#[cfg(test)]
+thread_local! { static BIND_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; }
+#[cfg(test)]
+pub(crate) fn binding_call_count() -> u64 {
+    BIND_CALLS.with(std::cell::Cell::get)
+}
+
 pub fn bind_local_player(chr_ins_addr: usize, scale: f32) -> TargetBinding {
+    #[cfg(test)]
+    BIND_CALLS.with(|calls| calls.set(calls.get() + 1));
     crate::memory_query::scoped(|| bind_local_player_inner(chr_ins_addr, scale))
 }
 

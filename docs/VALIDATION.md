@@ -1,5 +1,16 @@
 # Validation
 
+## 2.54.0-rc.4 performance and quiet build
+
+- Default debug/release: 202 passed, 8 optional tests ignored. Diagnostics feature release: 201 passed, 8 ignored (quiet-output test intentionally excluded).
+- Original PE guard/negative controls pass in default debug and release; Clippy passes for default and diagnostics features.
+- Consumer collection over 128 owned actors: 4,608 OS queries before, 128 after. One sampled timing pair was 12,256 us / 482 us. These are isolated fixture measurements, not game FPS.
+- Subject-owned 80-effect traversal: 241 queries before, 2 after (87 us / 26 us in the sampled pair). No data or permissions persist across operations.
+- Actual preparation/application over 120 stable frames: 122 complete bindings before, 4 after; changing scale still triggers a full bind.
+- Forty restoration passes over an 8,192-particle fixture: 40 span rebuilds before, 0 after (232 us / 23 us). Existing overlapping-array and departed-consumer tests remain green.
+- Quiet default test verifies no file creation and no message formatting; an isolated actual DLL load creates no log/JSONL files. Unsupported-host smoke loading does not validate game behavior.
+- Human report on rc.3: c9520 shrinks correctly and cloth does not twitch, but play remains slow and scale changes worsen it. rc.4 game verification is pending separately.
+
 ## 2.54.0-rc.3 model selection regression
 
 A live hostile c9520 had EnemyIns class, role 7 and active entry [4,4] in the debug collection (also referenced by chr_sets[133]). Both rc.2 enumeration and class selection rejected it. Separate regression runs reproduced each rejection before the fix.
@@ -103,5 +114,5 @@ The GitHub release preserves the accepted binary rather than replacing it with a
 new local build. ItsSHA256 is
 `F40FC6B9793A08E280C0CAD21289D1C164B31764AC7297477A71BA4C684AC00B`.
 That release's Cargo metadata and runtime identify version2.53. The candidate uses
-version2.54.0-rc.3 and is a separate binary. Locally rebuilt files need not have the
+version2.54.0-rc.4 and is a separate binary. Locally rebuilt files need not have the
 same binary hash.

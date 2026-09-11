@@ -25,6 +25,7 @@ pub(crate) struct Pool {
 #[derive(Default)]
 pub(crate) struct Prepared {
     objects: HashMap<usize, Arc<DimensionObjectBaseline>>,
+    spans: HashMap<usize, Vec<(usize, usize)>>,
     scales: HashMap<usize, f32>,
     protected: Vec<(usize, usize)>,
     pub rejected: HashMap<usize, &'static str>,
@@ -62,17 +63,31 @@ pub(super) fn capture(
 pub(super) fn retained_by_scaled_consumer(object: &DimensionObjectBaseline) -> bool {
     PREPARED.with(|slot| {
         slot.borrow().as_ref().is_some_and(|prepared| {
-            prepared
+            if prepared
                 .scales
                 .get(&object.address)
                 .is_some_and(|scale| *scale != 1.0)
-                || (!prepared.protected.is_empty()
-                    && resource_spans(object).iter().any(|&(begin, end)| {
-                        prepared
-                            .protected
-                            .iter()
-                            .any(|&(other_begin, other_end)| begin < other_end && other_begin < end)
-                    }))
+            {
+                return true;
+            }
+            if prepared.protected.is_empty() {
+                return false;
+            }
+            // Current resources already have validated immutable spans. A root
+            // that departed this pass still needs its old spans for alias checks.
+            let departed;
+            let spans = if let Some(spans) = prepared.spans.get(&object.address) {
+                spans.as_slice()
+            } else {
+                departed = resource_spans(object);
+                &departed
+            };
+            spans.iter().any(|&(begin, end)| {
+                prepared
+                    .protected
+                    .iter()
+                    .any(|&(other_begin, other_end)| begin < other_end && other_begin < end)
+            })
         })
     })
 }
@@ -307,6 +322,7 @@ impl Pool {
                 },
             );
             prepared.objects.insert(root, resource.baseline.clone());
+            prepared.spans.insert(root, resource.spans.clone());
             if prepared.scales[&root] != 1.0 {
                 prepared.protected.extend_from_slice(&resource.spans);
             }
@@ -316,6 +332,8 @@ impl Pool {
 }
 
 fn resource_spans(baseline: &DimensionObjectBaseline) -> Vec<(usize, usize)> {
+    #[cfg(test)]
+    SPAN_BUILDS.with(|calls| calls.set(calls.get() + 1));
     let mut spans: Vec<_> = baseline
         .arrays
         .iter()
@@ -341,6 +359,9 @@ fn resource_spans(baseline: &DimensionObjectBaseline) -> Vec<(usize, usize)> {
     }
     merged
 }
+
+#[cfg(test)]
+thread_local! { static SPAN_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 
 struct Groups(Vec<usize>);
 impl Groups {
@@ -418,6 +439,50 @@ mod tests {
         sim[0x48 / 8] = 1;
         sim[0xA8 / 8] = u32::MAX as usize;
         sim
+    }
+
+    #[test]
+    fn restoring_dimensions_reuses_prepared_resource_spans() {
+        let _environment = Environment::new();
+        let mut particles = vec![[0.0f32, 0.0, 2.0, 0.0]; 8192];
+        let mut independent = vec![[0.0f32, 0.0, 4.0, 0.0]; 8192];
+        let mut a = simulation(particles.as_mut_ptr() as usize);
+        let mut b = simulation(independent.as_mut_ptr() as usize);
+        a[0x48 / 8] = particles.len();
+        b[0x48 / 8] = independent.len();
+        let chars = [Character::new(9520, 1, 1.0), Character::new(2010, 2, 1.0)];
+        chars[0].attach_cloth(a.as_ptr() as usize);
+        chars[1].attach_cloth(b.as_ptr() as usize);
+        let mut pool = Pool::default();
+        let prepared = pool.prepare(&[
+            Consumer {
+                identity: chars[0].identity(),
+                scale: 1.0,
+            },
+            Consumer {
+                identity: chars[1].identity(),
+                scale: 0.6,
+            },
+        ]);
+        assert!(prepared.rejected.is_empty());
+        let mut baseline =
+            with_prepared(&prepared, || capture(a.as_ptr() as usize, || None)).unwrap();
+        baseline.apply(0.6).unwrap();
+        let before = SPAN_BUILDS.with(std::cell::Cell::get);
+        let started = std::time::Instant::now();
+        for _ in 0..40 {
+            with_prepared(&prepared, || baseline.apply_budgeted(1.0, 4096)).unwrap();
+        }
+        let builds = SPAN_BUILDS.with(std::cell::Cell::get) - before;
+        println!(
+            "RESTORE-SPANS passes=40 rebuilds={builds} elapsed_us={}",
+            started.elapsed().as_micros()
+        );
+        assert!(particles.iter().all(|p| p[2] == 2.0));
+        assert_eq!(
+            builds, 0,
+            "full cloth field scans repeat during restoration"
+        );
     }
 
     #[test]
