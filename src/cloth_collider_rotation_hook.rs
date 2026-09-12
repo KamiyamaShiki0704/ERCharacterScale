@@ -191,6 +191,17 @@ pub(crate) fn install(base: usize) -> bool {
 
 #[cfg(test)]
 pub(crate) fn exercise_owned_route(base: usize, child: usize, sim: usize, collider: usize) {
+    exercise_owned_route_at_scale(base, child, sim, collider, 0.5);
+}
+
+#[cfg(test)]
+pub(crate) fn exercise_owned_route_at_scale(
+    base: usize,
+    child: usize,
+    sim: usize,
+    collider: usize,
+    scale: f32,
+) {
     use std::cell::RefCell;
     #[derive(Debug)]
     struct Result {
@@ -216,12 +227,15 @@ pub(crate) fn exercise_owned_route(base: usize, child: usize, sim: usize, collid
             })
         });
     }
+    let (sine, cosine) = 1.0f32.sin_cos();
     let unit = [
-        1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 7., -3., 2., 1.,
+        cosine, 0., -sine, 0., 0., 1., 0., 0., sine, 0., cosine, 0., 7., -3., 2., 1.,
     ];
     let mut target = Transform(unit);
-    for i in [0, 5, 10] {
-        target.0[i] = 0.5;
+    for column in 0..3 {
+        for axis in 0..3 {
+            target.0[column * 4 + axis] *= scale;
+        }
     }
     // The previous input aliases the real owned collider+20 as in the caller.
     // Save/restore this fixture region; the production callback only reads it.
@@ -259,6 +273,20 @@ pub(crate) fn exercise_owned_route(base: usize, child: usize, sim: usize, collid
         let results = v.borrow();
         assert_eq!(results.len(), 6);
         let good = &results[0];
+        if std::env::var_os("ERCS_VELOCITY_NATIVE_REPLAY").is_some() {
+            let raw = |a: &[f32; 16]| {
+                a.iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>()
+            };
+            println!(
+                "VELOCITY-REPLAY {scale} {} {} {}",
+                raw(&good.values[0]),
+                raw(&good.values[1]),
+                raw(&unit)
+            );
+        }
         assert_eq!(good.values, [unit, unit]);
         assert_ne!(good.pointers, [r.rdx as usize, r.r8 as usize]);
         for result in results.iter() {

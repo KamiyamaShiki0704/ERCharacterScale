@@ -72,7 +72,7 @@ fn c3185_live_resources_pass_preflight_and_restore() {
         baselines.len() > 200,
         "both full cloth graphs must be replayed"
     );
-    for scale in [0.15, 0.15, 0.85, 2.0, 1.0] {
+    for scale in [1.0, 0.15, 0.15, 0.85, 2.0, 1.0] {
         for b in &mut baselines {
             b.apply(scale).expect("resource update");
         }
@@ -82,6 +82,27 @@ fn c3185_live_resources_pass_preflight_and_restore() {
                     scale_dimension_from_baseline(f.baseline, scale, f.power, f.preserve_unbounded)
                         .unwrap();
                 assert_eq!(read_f32(f.address).unwrap().to_bits(), expected.to_bits());
+            }
+            if std::env::var_os("ERCS_CONVEX_NATIVE_REPLAY").is_some()
+                && body_scale_port::module_rva(read_usize(b.address).unwrap()) == 0x2D7D580
+            {
+                let hex = |address: usize, length: usize| -> String {
+                    unsafe { std::slice::from_raw_parts(address as *const u8, length) }
+                        .iter()
+                        .map(|v| format!("{v:02x}"))
+                        .collect()
+                };
+                let mut parts = vec![hex(b.address, 0x120)];
+                for (off, stride) in [(0x20, 2), (0x30, 1), (0x40, 64)] {
+                    let p = read_usize(b.address + off).unwrap();
+                    let n = read_i32(b.address + off + 8).unwrap() as usize;
+                    parts.push(if n == 0 {
+                        "-".into()
+                    } else {
+                        hex(p, n * stride)
+                    });
+                }
+                println!("CONVEX-REPLAY {} {} {}", b.address, scale, parts.join(" "));
             }
         }
     }

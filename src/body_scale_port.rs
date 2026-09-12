@@ -7505,7 +7505,12 @@ pub(crate) fn collider_rotation_scope(child: usize, collider: usize) -> Option<f
     }
     let root = read_usize(child.checked_add(0x268)?)?;
     let colliders = read_usize(child.checked_add(0x168)?)?;
-    let count = bounded_i32_count(child.checked_add(0x170)?, 64)?;
+    // Use the same bound as cloth resource preflight. A smaller limit here
+    // silently skips rigid velocity inputs for otherwise supported units.
+    let count = bounded_i32_count(
+        child.checked_add(0x170)?,
+        crate::cloth_local_scale::MAX_COLLIDABLES,
+    )?;
     if count == 0
         || (0..count)
             .filter(|i| colliders.checked_add(i * 8).and_then(read_usize) == Some(collider))
@@ -7795,9 +7800,55 @@ fn diagnostic_selector_requires_exact_current_bd9004_active_children() {
         heap + 0x8100,
     );
     assert_eq!(data, unchanged);
+    // c3185 has 112 colliders in its second simulation. The actual hook must
+    // still send rigid matrices to native velocity, including its last entry.
+    let mut many_colliders: Vec<usize> = (0..256).map(|i| heap + 0x9000 + i * 8).collect();
+    many_colliders[0] = heap + 0x8100;
+    put(&mut data, 0x4168, many_colliders.as_ptr() as usize);
+    put(&mut data, 0x4170, many_colliders.len());
+    unit_state
+        .target_scale_bits
+        .store(0.85f32.to_bits(), Ordering::Release);
+    unit_state.cloth_instance_applied_scale_bits[slot].store(0.85f32.to_bits(), Ordering::Release);
+    for count in [64, 65, 112, 256] {
+        put(&mut data, 0x4170, count);
+        println!("COLLIDER-COUNT {count}");
+        crate::cloth_collider_rotation_hook::exercise_owned_route_at_scale(
+            image,
+            heap + 0x4000,
+            heap + 0x6000,
+            heap + 0x8100,
+            0.85,
+        );
+        let start = std::time::Instant::now();
+        for _ in 0..256 {
+            assert_eq!(rotation_scope(), Some(0.85));
+        }
+        println!(
+            "COLLIDER-SCOPE-COST count={count} calls=256 elapsed_us={}",
+            start.elapsed().as_micros()
+        );
+    }
+    many_colliders[0] = heap + 0x9000;
+    many_colliders[255] = heap + 0x8100;
+    assert_eq!(
+        rotation_scope(),
+        Some(0.85),
+        "last collider remains eligible"
+    );
+    many_colliders[0] = heap + 0x8100;
+    assert_eq!(rotation_scope(), None, "duplicate collider still rejected");
+    std::hint::black_box(&many_colliders);
+    unit_state
+        .target_scale_bits
+        .store(0.5f32.to_bits(), Ordering::Release);
+    unit_state.cloth_instance_applied_scale_bits[slot].store(0.5f32.to_bits(), Ordering::Release);
+    put(&mut data, 0x4168, heap + 0x8000);
+    put(&mut data, 0x4170, 1);
     for (at, bad) in [
         (0x8000, heap + 0x8200),
-        (0x4170, 65),
+        (0x4170, 257),
+        (0x4170, 0),
         (0x4168, usize::MAX - 3),
         (0x4268, heap + 0x3400),
         (0x3A00, heap + 0x4400),
