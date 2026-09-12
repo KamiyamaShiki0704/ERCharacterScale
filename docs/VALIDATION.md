@@ -141,7 +141,16 @@ DLL as `ERCharacterScale.toml`. It keeps the original player mappings and applie
 0.5 to supported enemies without requiring enemy SpEffects. Record actual model,
 NpcParam and event ID when reporting results. Developer diagnosis can use an explicitly enabled diagnostics build; the default DLL does not write logs.
 
-## Accepted runtime build
+## Current accepted runtime build
+
+- Version: `2.54.1`, build `er-2.54.1-convex-cloth`.
+- Human observation on 2026-09-12: c3185 scales correctly and frame rate is unchanged in the reported scene.
+- Debug/Release: 209 tests each; diagnostics Release: 208 tests; all 9 optional fixture/executable checks passed in Release.
+- The new c3185 replay covers 250 resource baselines and 46,582 dimension fields through shrink, scale changes and restoration. Collision-plane and grid coherence tests cover the newly supported convex shape.
+- Published DLL SHA256: `14AA5CA43503FFDD43D9CC24D6E8B256F51F71C0CCBD94A1611A537DA4AC0684`. Static runtime import and native loading checks passed.
+- This acceptance is limited to the reported scene; it does not imply testing every model or scale.
+
+## Historical accepted runtime build
 
 - Build: `er-2.53-rigid-collider-velocity` / release2.53.0.
 - Game: Windows x64, WW2.7.1.0(game1.17.1).
@@ -161,7 +170,7 @@ The default suite uses owned synthetic memory and mock native callbacks. It does
 not open a game process. Game-derived geometry, runtime dumps, original executables
 and private development records are not distributed.
 
-Seven integration tests retain their assertions but load local fixtures at run
+Eight integration tests retain their assertions but load local fixtures at run
 time. To run them, set `ER_CHARACTER_SCALE_FIXTURES` to a directory containing your
 own compatible capture fixtures, then run the selected test with `-- --ignored`.
 The separate executable-layout check uses `ERPS_COMPAT_EXE` to name the matching
@@ -184,7 +193,7 @@ not game binaries or captured assets.
 
 The historical v2.53.0 release preserves its accepted binary. Its SHA256 is
 `F40FC6B9793A08E280C0CAD21289D1C164B31764AC7297477A71BA4C684AC00B`.
-That release's Cargo metadata and runtime identify version2.53. The candidate uses
+That release's Cargo metadata and runtime identify version2.53. The historical rc.5 uses
 version2.54.0-rc.5 and is a separate binary. Its accepted DLL SHA256 is
 `C948C8E9BEB2D10F6CEA69964CCCCE56F16F9E594C0812F6A2025DB27A8DAFD8`.
 The rc.5 release uses this exact tested DLL. Locally rebuilt files need not have

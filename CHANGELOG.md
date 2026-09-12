@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.54.1 — convex geometry cloth collision shapes
+
+- Support hclConvexGeometryShape so models such as c3185 can scale without being rejected by cloth preflight. Scale plane distances, local bounds and centroid with the unit; scale inverse grid dimensions inversely. Keep normals, topology and native transforms unchanged.
+- Preserve shared-resource conflict protection, immutable original dimensions, numeric validation and budgeted writes.
+- Add collision/grid coherence and private c3185 resource replay coverage. The user confirmed c3185 scales correctly with unchanged frame rate.
+- Retain static C/C++ runtime linking and existing configuration behavior.
+
 ## 2.54.0 — embedded C/C++ runtime
 
 - Statically link the required C/C++ runtime into ERCharacterScale.dll; no separate Visual C++ Redistributable installation is required. Windows system components remain OS-provided.
