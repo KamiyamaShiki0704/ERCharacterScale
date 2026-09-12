@@ -1,0 +1,47 @@
+{
+  "version": "2.54.2",
+  "build_mode": "er-2.54.2-collider-velocity-coverage",
+  "artifact": "ERCharacterScale.dll",
+  "bytes": 1513984,
+  "sha256": "F4495B76DED6E599F61D2834AA2D4AA8AB135179DF3F08D7F3A108BF1624AED8",
+  "platform": "windows-x86_64",
+  "supported_game": "WW2.7.1.0 / game1.17.1",
+  "configuration": "ERCharacterScale.toml",
+  "scale_validation": "finite f32 greater than zero; no fixed minimum or maximum",
+  "numeric_writes": "reject unrepresentable derived dimensions; never clamp the requested scale",
+  "build_features": [],
+  "logging_enabled_by_default": false,
+  "automatic_tests": {
+    "debug": 209,
+    "release": 209,
+    "diagnostics_release": 208,
+    "optional_release": 9,
+    "clippy_default_and_diagnostics": "pass",
+    "rustfmt": "pass",
+    "quiet_dll_load": "pass with a static native host; no files created and no VC++ Redistributable module loaded",
+    "dependency_import_check": "pass; only Windows system DLL imports; no delay imports",
+    "c3185_replay": "250 resources / 46582 fields; expected pre-fix rejection, post-fix scale transitions and restoration passed",
+    "native_velocity_replay": "Actual hook outputs passed to original native velocity: stationary angular error zero for 64/65/112/256 colliders; old 65/112 path reproduced about 35.9 rad/s"
+  },
+  "human_visual_acceptance": "User confirmed c3185 physics behaves normally after the 2.54.2 fix and authorized publication; scoped to the reported scene",
+  "license": "MIT",
+  "dependency_repository": "https://github.com/KamiyamaShiki0704/fromsoftware-rs",
+  "dependency_revision": "02fa5681e27fd2ecd9da79d34aef9fae96805539",
+  "git_submodules": false,
+  "known_limitations": [
+    "Conflicting scales on shared mutable cloth resources keep connected consumers at baseline",
+    "Numerically unrepresentable dimensions and unverified layouts are rejected",
+    "Extreme-scale engine behavior and individual models require game validation"
+  ],
+  "crt_linkage": "static",
+  "runtime_requirements": "Windows system components only; no separate Visual C++ Redistributable",
+  "target": "x86_64-pc-windows-msvc",
+  "runtime_imports": [
+    "api-ms-win-core-synch-l1-2-0.dll",
+    "bcryptprimitives.dll",
+    "kernel32.dll",
+    "ntdll.dll",
+    "oleaut32.dll"
+  ],
+  "binary_source_revision": "9cc809e5ac335c147ef7cfbd80694d1e1779cc4a"
+}

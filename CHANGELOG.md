@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.54.2 — collider velocity coverage
+
+- Fix cloth twitching after scaling c3185: the rigid collider velocity hook previously rejected groups above 64 colliders, while cloth resource preflight supported 256. Share the same 256-collider bound so supported groups receive the rotation correction.
+- Preserve ownership, unique-membership, native call-site, numeric and array-bound checks. Add coverage for 65, 112 and 256 colliders, the last entry, duplicate entries and out-of-range counts.
+- Replay actual Hook outputs through original velocity code: the stationary 0.85-scale control previously produced about 35.9 rad/s of artificial angular velocity; corrected output is zero.
+- The user confirmed the c3185 physics issue is resolved in the tested scene. Retain convex geometry support, static runtime linking and configuration behavior.
+
 ## 2.54.1 — convex geometry cloth collision shapes
 
 - Support hclConvexGeometryShape so models such as c3185 can scale without being rejected by cloth preflight. Scale plane distances, local bounds and centroid with the unit; scale inverse grid dimensions inversely. Keep normals, topology and native transforms unchanged.

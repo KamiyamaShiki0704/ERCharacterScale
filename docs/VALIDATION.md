@@ -143,12 +143,13 @@ NpcParam and event ID when reporting results. Developer diagnosis can use an exp
 
 ## Current accepted runtime build
 
-- Version: `2.54.1`, build `er-2.54.1-convex-cloth`.
-- Human observation on 2026-09-12: c3185 scales correctly and frame rate is unchanged in the reported scene.
+- Version: `2.54.2`, build `er-2.54.2-collider-velocity-coverage`.
+- Human observation: the user confirmed c3185 physics behaves normally after the fix in the reported scene.
 - Debug/Release: 209 tests each; diagnostics Release: 208 tests; all 9 optional fixture/executable checks passed in Release.
-- The new c3185 replay covers 250 resource baselines and 46,582 dimension fields through shrink, scale changes and restoration. Collision-plane and grid coherence tests cover the newly supported convex shape.
-- Published DLL SHA256: `14AA5CA43503FFDD43D9CC24D6E8B256F51F71C0CCBD94A1611A537DA4AC0684`. Static runtime import and native loading checks passed.
-- This acceptance is limited to the reported scene; it does not imply testing every model or scale.
+- Actual hook-to-native replay reproduces artificial angular velocity when the old 64-collider guard rejects otherwise supported groups. The corrected path yields zero stationary angular error for 64, 65, 112 and 256 colliders. Duplicate, last-entry and invalid-count cases retain ownership and bounds checks.
+- The convex resource replay and original contact checks remain valid. They cover dimensions and contact math; they do not alone establish temporal cloth behavior.
+- Published DLL SHA256: `F4495B76DED6E599F61D2834AA2D4AA8AB135179DF3F08D7F3A108BF1624AED8`. Static runtime import and native loading checks passed.
+- The earlier v2.54.1 report confirmed size and frame rate; subsequent testing found cloth twitching, addressed in v2.54.2. The current acceptance is limited to the reported scene, not every model or scale.
 
 ## Historical accepted runtime build
 
