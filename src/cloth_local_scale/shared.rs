@@ -5,6 +5,10 @@ use super::*;
 use crate::unit_runtime::Identity;
 use std::{cell::RefCell, collections::HashSet, sync::Arc};
 
+#[cfg(test)]
+#[path = "../test_support/convex_replay.rs"]
+mod convex_replay;
+
 #[derive(Clone, Copy)]
 pub(crate) struct Consumer {
     pub identity: Identity,

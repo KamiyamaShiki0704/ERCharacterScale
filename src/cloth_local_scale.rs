@@ -7,12 +7,17 @@ use crate::{
 
 pub(crate) mod shared;
 
+#[cfg(test)]
+#[path = "test_support/convex_dimensions.rs"]
+mod convex_dimensions;
+
 const ER_HCL_SIM_CLOTH_DATA_VTABLE_RVA: usize = 0x2D8B6F8;
 const ER_HCL_COLLIDABLE_VTABLE_RVA: usize = 0x2D8B758;
 const ER_HCL_CAPSULE_SHAPE_VTABLE_RVA: usize = 0x2D896D0;
 const ER_HCL_TAPERED_CAPSULE_SHAPE_VTABLE_RVA: usize = 0x2D7DBC8;
 const ER_HCL_SPHERE_SHAPE_VTABLE_RVA: usize = 0x2D89D20;
 const ER_HCL_PLANE_SHAPE_VTABLE_RVA: usize = 0x2D84968;
+const ER_HCL_CONVEX_GEOMETRY_SHAPE_VTABLE_RVA: usize = 0x2D7D580;
 
 const MAX_PARTICLES: usize = 16_384;
 const MAX_POSES: usize = 256;
@@ -1202,9 +1207,41 @@ fn capture_shape_baseline(shape: usize) -> Option<DimensionObjectBaseline> {
             // A plane's normal xyz is dimensionless; only equation.w is a distance.
             baseline.capture_field(shape.checked_add(0x2C)?, DimensionPower::Linear, false)?;
         }
+        ER_HCL_CONVEX_GEOMETRY_SHAPE_VTABLE_RVA => {
+            capture_convex_geometry_dimensions(&mut baseline, shape)?;
+        }
         _ => return None,
     }
     Some(baseline)
+}
+
+fn capture_convex_geometry_dimensions(
+    baseline: &mut DimensionObjectBaseline,
+    shape: usize,
+) -> Option<()> {
+    // ER reflection: tetrahedraGrid +20, gridCells +30, tetrahedraEquations +40.
+    // 15CE950 uses ushort cell offsets and byte tetrahedron indices; 15CED00
+    // handles the unpartitioned form. Observe indices without modifying them.
+    baseline.capture_array(shape, 0x20, 0x28, 2, 65_536)?;
+    baseline.capture_array(shape, 0x30, 0x38, 1, 65_536)?;
+    let (equations, count) = baseline.capture_array(shape, 0x40, 0x48, 0x40, 65_535)?;
+    for index in 0..count {
+        // Four transposed plane equations: XYZ are unit normals, the final
+        // vector contains FOUR distances. Scale every lane, not just XYZ.
+        baseline.capture_vec4(
+            equations.checked_add(index * 0x40 + 0x30)?,
+            DimensionPower::Linear,
+        )?;
+    }
+    // Local AABB and centroid scale as positions. Grid lookup computes
+    // (position - aabb.min) * invCellSize, so its inverse dimensions divide by s.
+    for offset in [0xD0, 0xE0, 0xF0] {
+        baseline.capture_vec3(shape.checked_add(offset)?, DimensionPower::Linear)?;
+    }
+    baseline.capture_vec3(shape.checked_add(0x100)?, DimensionPower::Inverse)?;
+    // 15CFC40 copies the shape then replaces localFromWorld/worldFromLocal
+    // from the current collidable transform. Do not scale their rotation axes.
+    Some(())
 }
 
 fn is_supported_shape_vtable(vtable_rva: usize) -> bool {
@@ -1214,6 +1251,7 @@ fn is_supported_shape_vtable(vtable_rva: usize) -> bool {
             | ER_HCL_TAPERED_CAPSULE_SHAPE_VTABLE_RVA
             | ER_HCL_SPHERE_SHAPE_VTABLE_RVA
             | ER_HCL_PLANE_SHAPE_VTABLE_RVA
+            | ER_HCL_CONVEX_GEOMETRY_SHAPE_VTABLE_RVA
     )
 }
 
