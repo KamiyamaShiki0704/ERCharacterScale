@@ -10,6 +10,13 @@ The initial SpEffect mapping and player-scale approach reference the MIT-license
 PlayerTargetResize / ERSkeletonMan code by Dasaav-dsv. No skeleton-editing library
 or vendored dependency source is included in this repository.
 
+## Native toolchain runtime
+
+Windows release binaries also contain statically linked Microsoft C/C++ runtime
+code supplied by the MSVC / Windows SDK toolchain. Those runtime portions remain
+subject to their applicable Microsoft license terms and are not relicensed under
+this project's MIT license. Windows system DLLs are not redistributed in this package.
+
 ## Dependency inventory
 
 | Package | Version | Declared license | Source |

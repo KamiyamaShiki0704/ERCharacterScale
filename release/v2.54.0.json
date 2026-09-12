@@ -1,0 +1,45 @@
+{
+  "version": "2.54.0",
+  "build_mode": "er-2.54-static-crt",
+  "artifact": "ERCharacterScale.dll",
+  "bytes": 1512960,
+  "sha256": "7B47B0BBA517E83A7B3C4DBC8B5517DF3F570E65727F400C1FAF3BA06AFBD04B",
+  "platform": "windows-x86_64",
+  "supported_game": "WW2.7.1.0 / game1.17.1",
+  "configuration": "ERCharacterScale.toml",
+  "scale_validation": "finite f32 greater than zero; no fixed minimum or maximum",
+  "numeric_writes": "reject unrepresentable derived dimensions; never clamp the requested scale",
+  "build_features": [],
+  "logging_enabled_by_default": false,
+  "automatic_tests": {
+    "debug": 208,
+    "release": 208,
+    "diagnostics_release": 207,
+    "optional_debug": 8,
+    "optional_release": 8,
+    "clippy_default_and_diagnostics": "pass",
+    "rustfmt": "pass",
+    "quiet_dll_load": "pass with a static native host; no files created and no VC++ Redistributable module loaded",
+    "dependency_import_check": "pass; only Windows system DLL imports; no delay imports"
+  },
+  "human_visual_acceptance": "rc.6 behavior accepted by user on 2026-09-12; scaling code unchanged; new static-CRT build separately verified by automatic tests and native loading",
+  "license": "MIT",
+  "dependency_repository": "https://github.com/KamiyamaShiki0704/fromsoftware-rs",
+  "dependency_revision": "02fa5681e27fd2ecd9da79d34aef9fae96805539",
+  "git_submodules": false,
+  "known_limitations": [
+    "Conflicting scales on shared mutable cloth resources keep connected consumers at baseline",
+    "Numerically unrepresentable dimensions and unverified layouts are rejected",
+    "Extreme-scale engine behavior and individual models require game validation"
+  ],
+  "crt_linkage": "static",
+  "runtime_requirements": "Windows system components only; no separate Visual C++ Redistributable",
+  "target": "x86_64-pc-windows-msvc",
+  "runtime_imports": [
+    "api-ms-win-core-synch-l1-2-0.dll",
+    "bcryptprimitives.dll",
+    "kernel32.dll",
+    "ntdll.dll",
+    "oleaut32.dll"
+  ]
+}

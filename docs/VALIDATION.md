@@ -1,3 +1,29 @@
+# Embedded runtime — 2.54.0
+
+The default Cargo configuration builds x86_64-pc-windows-msvc with `+crt-static`.
+The explicit target keeps host build scripts and proc-macros separate. The output
+is `target/x86_64-pc-windows-msvc/release/ERCharacterScale.dll`.
+
+After building, run this check with Python 3 (no additional Python packages):
+
+```powershell
+python tools/check_runtime_deps.py target/x86_64-pc-windows-msvc/release/ERCharacterScale.dll
+```
+
+The check parses normal and delay-load imports and rejects any DLL outside the
+explicit Windows system list. It rejects rc.6's dynamic VCRUNTIME/UCRT imports.
+Windows components can use the OS-provided UCRT internally; that is separate
+from ERCharacterScale's statically linked runtime and does not require a VC++
+Redistributable installation.
+
+A separate native host, itself built with static CRT, checks loading and module
+provenance without a preloaded VC++ redistributable. That smoke check does not
+exercise the game hooks or replace game visual acceptance. Existing configuration,
+scaling, cloth, ownership and performance regressions remain required.
+
+Build references: [Rust CRT linkage](https://doc.rust-lang.org/reference/linkage.html#static-and-dynamic-c-runtimes),
+[Cargo host/target rustflags](https://doc.rust-lang.org/cargo/reference/config.html#buildrustflags).
+
 # Positive finite scales — rc.6
 
 The fixed scale bounds are removed throughout configuration, cached pose transitions,
@@ -11,7 +37,7 @@ wide intermediate dimension calculations, unbounded cloth sentinels, recovery af
 an invalid request, and late consumers of already scaled shared arrays. Cloth
 preflight uses four cached pairs of extrema instead of scanning all fields per frame.
 Existing ownership, cloth replay, restoration and rc.5 memory-query cost checks remain.
-In-game visual acceptance for rc.6 and the new scale range is pending.
+The user confirmed rc.6 works normally on 2026-09-12 after correcting duplicate rule names. This covers the reported scene; it is not universal model or extreme-scale validation.
 
 # Validation
 

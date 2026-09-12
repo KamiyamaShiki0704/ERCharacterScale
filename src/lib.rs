@@ -39,7 +39,7 @@ use fromsoftware_shared::{FromStatic, SharedTaskImpExt};
 const DLL_PROCESS_DETACH: u32 = 0;
 const DLL_PROCESS_ATTACH: u32 = 1;
 
-const BUILD_MODE: &str = "er-2.54-configurable-units-rc6";
+const BUILD_MODE: &str = "er-2.54-static-crt";
 const ENABLE_SYNC_DIAGNOSTIC: bool = log::ENABLED;
 const SCALE_COLLISION: bool = true;
 const SCALE_WEIGHT: bool = false;

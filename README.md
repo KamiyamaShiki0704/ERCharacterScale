@@ -4,7 +4,7 @@
 
 通过 TOML 配置 Elden Ring 玩家与其他角色的整体体型比例，支持 SpEffect 触发和无条件缩放。
 
-[下载 v2.54.0-rc.6](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.54.0-rc.6) · [配置说明](docs/CONFIGURATION.md) · [版本记录](CHANGELOG.md)
+[下载 v2.54.0](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.54.0) · [配置说明](docs/CONFIGURATION.md) · [版本记录](CHANGELOG.md)
 
 ## 功能
 
@@ -18,11 +18,13 @@
 
 适用于 **Windows x64、离线 Elden Ring WW2.7.1.0 / game1.17.1**。其他程序版本需要另行验证。
 
-1. 从 [Release 页面](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.54.0-rc.6) 下载 `ERCharacterScale-v2.54.0-rc.6-windows-x64.zip`。
+1. 从 [Release 页面](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.54.0) 下载 `ERCharacterScale-v2.54.0-windows-x64.zip`。
 2. 将 `ERCharacterScale.dll` 和 `ERCharacterScale.toml` 放在同一目录，并使用现有 DLL 加载器加载该 DLL。
 3. 按需要编辑 TOML，然后启动游戏。之后修改配置文件，需要重启游戏生效。
 
 升级时退出游戏后替换 DLL，保留自己的 `ERCharacterScale.toml`。包中的 TOML 是默认配置；默认启用玩家效果规则，**非玩家缩放默认关闭**。
+
+发布的 DLL 已内置所需的 C/C++ 运行库，无需额外安装 Visual C++ Redistributable 或 Rust。Windows 系统组件由操作系统提供。
 
 ## 配置
 
@@ -51,7 +53,7 @@ cd ERCharacterScale
 cargo build --release --locked
 ```
 
-输出为 `target/release/ERCharacterScale.dll`。Cargo 从 Git 获取 `fromsoftware-rs`，固定提交为 `02fa5681e27fd2ecd9da79d34aef9fae96805539`；仓库不包含该依赖源码或 Git 子模块。`Cargo.lock` 固定依赖解析结果。
+输出为 `target/x86_64-pc-windows-msvc/release/ERCharacterScale.dll`。仓库已配置静态 C/C++ 运行库链接。Cargo 从 Git 获取 `fromsoftware-rs`，固定提交为 `02fa5681e27fd2ecd9da79d34aef9fae96805539`；仓库不包含该依赖源码或 Git 子模块。`Cargo.lock` 固定依赖解析结果。
 
 开发与自动检查入口见 [验证说明](docs/VALIDATION.md)。
 

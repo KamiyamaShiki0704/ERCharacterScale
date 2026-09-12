@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.54.0 — embedded C/C++ runtime
+
+- Statically link the required C/C++ runtime into ERCharacterScale.dll; no separate Visual C++ Redistributable installation is required. Windows system components remain OS-provided.
+- Make the x64 MSVC target and static CRT flags part of the default Cargo configuration, keeping host proc-macros separate.
+- Add a dependency check for normal and delayed PE imports. Update source-build output paths and runtime requirements in both READMEs.
+- Retain the rc.6 scaling code and user configuration behavior. The user confirmed rc.6 works normally after correcting duplicate rule names; static runtime packaging is validated separately.
+
 ## 2.54.0-rc.6 — positive finite scales
 
 - Remove the fixed 0.5–3.0 scale restriction from configuration, body pose transitions and cloth routes. Player and model-specific non-player rules accept any positive finite f32 scale.

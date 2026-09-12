@@ -1,0 +1,6 @@
+[build]
+# Keep proc-macros and build scripts on the host, without target CRT flags.
+target = "x86_64-pc-windows-msvc"
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
