@@ -4,7 +4,7 @@
 
 通过 TOML 配置 Elden Ring 玩家与其他角色的整体体型比例，支持 SpEffect 触发和无条件缩放。
 
-[下载 v2.54.0](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.54.0) · [配置说明](docs/CONFIGURATION.md) · [版本记录](CHANGELOG.md)
+[下载 v2.54.3](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.54.3) · [配置说明](docs/CONFIGURATION.md) · [版本记录](CHANGELOG.md)
 
 ## 功能
 
@@ -18,7 +18,7 @@
 
 适用于 **Windows x64、离线 Elden Ring WW2.7.1.0 / game1.17.1**。其他程序版本需要另行验证。
 
-1. 从 [Release 页面](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.54.0) 下载 `ERCharacterScale-v2.54.0-windows-x64.zip`。
+1. 从 [Release 页面](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.54.3) 下载 `ERCharacterScale-v2.54.3-windows-x64.zip`。
 2. 将 `ERCharacterScale.dll` 和 `ERCharacterScale.toml` 放在同一目录，并使用现有 DLL 加载器加载该 DLL。
 3. 按需要编辑 TOML，然后启动游戏。之后修改配置文件，需要重启游戏生效。
 

@@ -1,6 +1,8 @@
 # Changelog
 
-## 2.54.3-rc.1 — equipment skeleton map coverage (accepted)
+## 2.54.3 — equipment skeleton map coverage
+
+- Promote the game-tested 2.54.3-rc.1 DLL unchanged to this stable release. The embedded build identifier retains rc.1 to preserve the accepted binary.
 
 - Fix stretched hair on enlarged equipment models whose cloth maps exceed 512 rows. Solver source preparation previously applied a per-child limit to skeleton-wide mappings, while render correction still ran.
 - Share a 16,384-transform resource guard across skeleton pose, source mapping and render output. Process validated actual array lengths and retain index, memory, ownership and numeric checks.

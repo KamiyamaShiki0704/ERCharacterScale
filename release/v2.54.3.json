@@ -1,0 +1,47 @@
+{
+  "version": "2.54.3",
+  "build_mode": "er-2.54.3-rc.1-equipment-source-map-coverage",
+  "artifact": "ERCharacterScale.dll",
+  "bytes": 1513984,
+  "sha256": "7A65163DFAE1A3A001C6DC5BF8925430258F9F44DB7B68F052FCD9E3D638816C",
+  "platform": "windows-x86_64",
+  "supported_game": "WW2.7.1.0 / game1.17.1",
+  "configuration": "ERCharacterScale.toml",
+  "scale_validation": "finite f32 greater than zero; no fixed minimum or maximum",
+  "numeric_writes": "reject unrepresentable derived dimensions; never clamp the requested scale",
+  "build_features": [],
+  "logging_enabled_by_default": false,
+  "automatic_tests": {
+    "release": 212,
+    "diagnostics_release": 211,
+    "optional_release": 9,
+    "clippy_default_and_diagnostics": "pass",
+    "rustfmt": "pass",
+    "quiet_dll_load": "pass; no files created by the static native host load",
+    "dependency_import_check": "pass; Windows system imports only, no delayed imports",
+    "equipment_mapping_replay": "Actual 850-row mapping passed; 512/513/4097/16384 boundaries, source restoration, native render masks and invalid storage covered"
+  },
+  "human_visual_acceptance": "User confirmed the reported BD_M_5290 hair issue is resolved in the tested enlarged-player scene and authorized publication.",
+  "license": "MIT",
+  "dependency_repository": "https://github.com/KamiyamaShiki0704/fromsoftware-rs",
+  "dependency_revision": "02fa5681e27fd2ecd9da79d34aef9fae96805539",
+  "git_submodules": false,
+  "known_limitations": [
+    "Conflicting scales on shared mutable cloth resources keep connected consumers at baseline",
+    "Numerically unrepresentable dimensions and unverified layouts are rejected",
+    "Extreme-scale engine behavior and individual models require game validation"
+  ],
+  "crt_linkage": "static",
+  "runtime_requirements": "Windows system components only; no separate Visual C++ Redistributable",
+  "target": "x86_64-pc-windows-msvc",
+  "runtime_imports": [
+    "api-ms-win-core-synch-l1-2-0.dll",
+    "bcryptprimitives.dll",
+    "kernel32.dll",
+    "ntdll.dll",
+    "oleaut32.dll"
+  ],
+  "binary_source_revision": "7b0aaad06d1ff7c7b634b1372b5758a0bc5d9b7c",
+  "binary_package_version": "2.54.3-rc.1",
+  "release_kind": "stable; promoted unchanged after game acceptance"
+}
