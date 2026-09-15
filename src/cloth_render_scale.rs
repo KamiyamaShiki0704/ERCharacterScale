@@ -2,7 +2,10 @@
 //! ER 26B4280 native writeback masks -> B455A0 mapped affine48 range.
 //! No magnitude-based row selection, allocation, global state, or game calls.
 
-pub const MAX_TRANSFORMS: usize = 4096;
+// Resource guard, not a model-format limit. Keep skeleton-wide consumers on
+// the same bound as the private solver pose; all accesses still use validated
+// actual array lengths. Fixed scratch remains bounded and allocation-free.
+pub const MAX_TRANSFORMS: usize = 16_384;
 const MAX_ENTRIES: usize = 32;
 
 pub struct SourceMask {
@@ -314,7 +317,49 @@ mod tests {
         assert!(capture_mask(0x100, 6, &reader(&m)).is_none());
         assert!(capture_mask(usize::MAX, 6, &reader(&m)).is_none());
         assert!(SourceMask::new(0).is_none());
-        assert!(SourceMask::new(4097).is_none());
+        assert!(SourceMask::new(MAX_TRANSFORMS + 1).is_none());
+    }
+
+    #[test]
+    fn large_native_map_last_row_is_captured_and_reconciled() {
+        for count in [850usize, 4096, 4097, MAX_TRANSFORMS] {
+            let mut m = native_fixture();
+            m.resize(0x2000 + count * 2, 0);
+            put(&mut m, 0x318, &0x800u64.to_le_bytes());
+            put(&mut m, 0x518, &0x2000u64.to_le_bytes());
+            for (address, value) in [
+                (0x320, count.div_ceil(32)),
+                (0x328, count),
+                (0x420, count),
+                (0x510, count),
+            ] {
+                put(&mut m, address, &(value as i32).to_le_bytes());
+            }
+            put(
+                &mut m,
+                0x800 + ((count - 1) / 32) * 4,
+                &(1u32 << ((count - 1) % 32)).to_le_bytes(),
+            );
+            let mut mapping = vec![-1i16; count];
+            mapping[count - 1] = (count - 1) as i16;
+            for (index, value) in mapping.iter().enumerate() {
+                put(&mut m, 0x2000 + index * 2, &value.to_le_bytes());
+            }
+            let mask = capture_mask(0x100, count, &reader(&m)).unwrap();
+            assert_eq!(
+                (0..count).filter(|&i| mask.contains(i)).collect::<Vec<_>>(),
+                vec![count - 1]
+            );
+            let mut output = [ROW];
+            assert_eq!(
+                reconcile_range(&mut output, &mapping, count - 1, &mask, 1.12),
+                Some(1)
+            );
+            assert_eq!(output[0], converted(ROW, 1.12).unwrap());
+            // Reject unreadable storage even with a valid count.
+            m.pop();
+            assert!(capture_mask(0x100, count, &reader(&m)).is_none());
+        }
     }
 
     #[test]

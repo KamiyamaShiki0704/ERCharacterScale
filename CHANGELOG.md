@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.54.3-rc.1 — equipment skeleton map coverage (accepted)
+
+- Fix stretched hair on enlarged equipment models whose cloth maps exceed 512 rows. Solver source preparation previously applied a per-child limit to skeleton-wide mappings, while render correction still ran.
+- Share a 16,384-transform resource guard across skeleton pose, source mapping and render output. Process validated actual array lengths and retain index, memory, ownership and numeric checks.
+- Add regression coverage for large maps, duplicate and unmapped entries, the last mapped source, lazy-source selection, translation restoration, native writeback masks and invalid storage.
+- The user confirmed the reported BD_M_5290 hair issue is resolved after testing the 1.12-scale candidate. Configuration and movement/lock-on behavior are unchanged.
+
 ## 2.54.2 — collider velocity coverage
 
 - Fix cloth twitching after scaling c3185: the rigid collider velocity hook previously rejected groups above 64 colliders, while cloth resource preflight supported 256. Share the same 256-collider bound so supported groups receive the rotation correction.

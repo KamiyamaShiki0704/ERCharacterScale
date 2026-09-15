@@ -117,7 +117,7 @@ const POSE_TRANSLATION_OFFSET: usize = 0x00;
 const POSE_LOCAL_SCALE_OFFSET: usize = 0x20;
 const AFFINE_MATRIX_STRIDE: usize = 0x30;
 const MATRIX_STRIDE: usize = 0x40;
-const MAX_OUTPUTS_PER_CALL: usize = 4096;
+const MAX_OUTPUTS_PER_CALL: usize = cloth_render_scale::MAX_TRANSFORMS;
 const MATRIX_CANDIDATE_SLOTS: usize = 16;
 pub const CLOTH_INSTANCE_SLOTS: usize = 64;
 pub const CLOTH_CHILD_SLOTS: usize = 64;
@@ -127,7 +127,7 @@ const MAX_CLOTH_PARTICLES_PER_CHILD: usize = 16_384;
 const MAX_CLOTH_TRANSFORM_ENTRIES_PER_CHILD: usize = 512;
 const MAX_CLOTH_SOLVER_INPUT_ENTRIES: usize = 32;
 const MAX_CLOTH_SOLVER_INPUT_TRANSFORMS: usize = 16_384;
-const MAX_CLOTH_SOLVER_SOURCE_TRANSFORMS: usize = 16_384;
+const MAX_CLOTH_SOLVER_SOURCE_TRANSFORMS: usize = cloth_render_scale::MAX_TRANSFORMS;
 const CLOTH_SOLVER_ENTRY_STRIDE: usize = 0x38;
 const CLOTH_SOLVER_SOURCE_TRANSFORM_STRIDE: usize = 0x30;
 pub const CLOTH_CONSTRAINT_SET_SLOTS: usize = 64;
@@ -2058,8 +2058,11 @@ fn collect_solver_source_indices(
         }
         let output_count = usize::try_from(read_i32(output_owner.checked_add(0x20)?)?).ok()?;
         let mapping_count = usize::try_from(read_u32(mapping.checked_add(0x10)?)?).ok()?;
-        if output_count > MAX_CLOTH_TRANSFORM_ENTRIES_PER_CHILD
-            || mapping_count > MAX_CLOTH_TRANSFORM_ENTRIES_PER_CHILD
+        // These are skeleton-wide maps, not per-child simulation arrays.
+        // Match the render writeback bound so large equipment cannot receive
+        // render correction while silently bypassing source preparation.
+        if output_count > cloth_render_scale::MAX_TRANSFORMS
+            || mapping_count > cloth_render_scale::MAX_TRANSFORMS
         {
             return None;
         }
@@ -9437,11 +9440,58 @@ mod tests {
 
     #[test]
     fn solver_source_selection_keeps_direct_and_lazy_resolved_mappings() {
-        let mut transforms = Box::new([[0.0f32; 12]; 2]);
-        let mut flags = Box::new([0u32, 2u32]);
+        check_solver_source_selection(2, &[vec![0, 1]], true);
+    }
+
+    #[test]
+    fn solver_source_selection_covers_large_equipment_maps() {
+        // Equipment can expose the entire skeleton in every cloth entry,
+        // including unmapped rows. BD_M_5290 exposes 850 rows per entry.
+        for count in [
+            512,
+            513,
+            850,
+            4097,
+            crate::cloth_render_scale::MAX_TRANSFORMS,
+        ] {
+            let mut mapping = vec![-1; count];
+            mapping[0] = 0;
+            mapping[count - 1] = (count - 1) as i16;
+            check_solver_source_selection(count, &[mapping.clone(), mapping], true);
+        }
+        let invalid_count = crate::cloth_render_scale::MAX_TRANSFORMS + 1;
+        check_solver_source_selection(invalid_count, &[vec![0; invalid_count]], false);
+    }
+
+    #[test]
+    fn solver_source_selection_replays_optional_equipment_capture() {
+        let Ok(path) = std::env::var("ER_SCALE_SOURCE_MAPPING_FIXTURE") else {
+            return;
+        };
+        let fixture = std::fs::read_to_string(path).unwrap();
+        let mut lines = fixture.lines();
+        let count: usize = lines.next().unwrap().parse().unwrap();
+        let mappings: Vec<Vec<i16>> = lines
+            .map(|line| {
+                let mut values = line.split_whitespace();
+                let output_count: usize = values.next().unwrap().parse().unwrap();
+                let mapping: Vec<i16> = values.map(|value| value.parse().unwrap()).collect();
+                assert_eq!(mapping.len(), output_count);
+                mapping
+            })
+            .collect();
+        check_solver_source_selection(count, &mappings, true);
+    }
+
+    fn check_solver_source_selection(count: usize, maps: &[Vec<i16>], accepted: bool) {
+        let mut transforms =
+            vec![[0.0, 2.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0]; count];
+        let mut flags = vec![0u32; count];
+        flags[count - 1] = 2;
         let mut metadata = Box::new([0u8; 0x40]);
         unsafe {
-            (metadata.as_mut_ptr().add(POSE_METADATA_COUNT_OFFSET) as *mut i32).write_unaligned(2);
+            (metadata.as_mut_ptr().add(POSE_METADATA_COUNT_OFFSET) as *mut i32)
+                .write_unaligned(count as i32);
         }
         let mut update_context = Box::new([0u8; 0x30]);
         unsafe {
@@ -9453,42 +9503,82 @@ mod tests {
                 .write_unaligned(flags.as_mut_ptr() as usize);
         }
 
-        let mut destination = Box::new([0u8; 0x28]);
-        unsafe {
-            (destination.as_mut_ptr().add(0x20) as *mut i32).write_unaligned(2);
-        }
-        let mut mapped_indices = Box::new([0i16, 1i16]);
-        let mut mapping = Box::new([0u8; 0x20]);
-        unsafe {
-            (mapping.as_mut_ptr().add(0x10) as *mut u32).write_unaligned(2);
-            (mapping.as_mut_ptr().add(0x18) as *mut usize)
-                .write_unaligned(mapped_indices.as_mut_ptr() as usize);
-        }
-        let mut entries = Box::new([0u8; CLOTH_SOLVER_ENTRY_STRIDE]);
-        unsafe {
-            (entries.as_mut_ptr() as *mut usize).write_unaligned(destination.as_ptr() as usize);
-            (entries.as_mut_ptr().add(0x08) as *mut usize)
-                .write_unaligned(mapping.as_ptr() as usize);
+        let mut destinations = vec![[0u8; 0x28]; maps.len()];
+        let mut mappings = vec![[0u8; 0x20]; maps.len()];
+        let mut entries = vec![[0u8; CLOTH_SOLVER_ENTRY_STRIDE]; maps.len()];
+        for (index, mapped_indices) in maps.iter().enumerate() {
+            let destination = &mut destinations[index];
+            let mapping = &mut mappings[index];
+            let entry = &mut entries[index];
+            unsafe {
+                (destination.as_mut_ptr().add(0x20) as *mut i32)
+                    .write_unaligned(mapped_indices.len() as i32);
+                (mapping.as_mut_ptr().add(0x10) as *mut u32)
+                    .write_unaligned(mapped_indices.len() as u32);
+                (mapping.as_mut_ptr().add(0x18) as *mut usize)
+                    .write_unaligned(mapped_indices.as_ptr() as usize);
+                (entry.as_mut_ptr() as *mut usize).write_unaligned(destination.as_ptr() as usize);
+                (entry.as_mut_ptr().add(0x08) as *mut usize)
+                    .write_unaligned(mapping.as_ptr() as usize);
+            }
         }
         let mut core = Box::new([0u8; 0x50]);
         unsafe {
             (core.as_mut_ptr().add(0x40) as *mut usize).write_unaligned(entries.as_ptr() as usize);
-            (core.as_mut_ptr().add(0x48) as *mut i32).write_unaligned(1);
+            (core.as_mut_ptr().add(0x48) as *mut i32).write_unaligned(maps.len() as i32);
         }
 
         let mut selected = Vec::new();
         let mut lazy = Vec::new();
-        assert_eq!(
-            collect_solver_source_indices(
-                core.as_ptr() as usize,
-                update_context.as_ptr() as usize,
-                &mut selected,
-                &mut lazy,
-            ),
-            Some((transforms.as_ptr() as usize, 2))
+        let result = collect_solver_source_indices(
+            core.as_ptr() as usize,
+            update_context.as_ptr() as usize,
+            &mut selected,
+            &mut lazy,
         );
-        assert_eq!(selected, [0, 1]);
-        assert_eq!(lazy, [1]);
+        if !accepted {
+            assert_eq!(result, None);
+            return;
+        }
+        assert_eq!(
+            result,
+            Some((transforms.as_ptr() as usize, count)),
+            "source count {count}"
+        );
+        let mut expected = Vec::new();
+        for &index in maps.iter().flatten().filter(|&&index| index >= 0) {
+            if !expected.contains(&(index as usize)) {
+                expected.push(index as usize);
+            }
+        }
+        let expected_lazy: Vec<_> = expected
+            .iter()
+            .copied()
+            .filter(|&index| flags[index] & 2 != 0)
+            .collect();
+        assert_eq!(selected, expected);
+        assert_eq!(lazy, expected_lazy);
+        let original = transforms.clone();
+        let mut backups = Vec::new();
+        for scale in [1.12, 0.85, 2.0] {
+            assert_eq!(
+                scale_solver_source_transforms(&mut transforms, &selected, scale, &mut backups),
+                Some(selected.len())
+            );
+            for index in 0..count {
+                assert_eq!(
+                    transforms[index][1],
+                    if selected.contains(&index) {
+                        2.0 * scale
+                    } else {
+                        2.0
+                    }
+                );
+                assert_eq!(transforms[index][3..], original[index][3..]);
+            }
+            restore_solver_source_transforms(&mut transforms, &backups);
+            assert_eq!(transforms, original);
+        }
     }
 
     #[test]

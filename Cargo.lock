@@ -287,7 +287,7 @@ checksum = "7a7cf3f8ecebb0f4895f4892a8be0a0dc81b498f9d56735cb769dc31bf00815b"
 
 [[package]]
 name = "player-scale-no-bone"
-version = "2.54.2"
+version = "2.54.3-rc.1"
 dependencies = [
  "eldenring",
  "fromsoftware-shared",
