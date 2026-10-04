@@ -4,9 +4,9 @@
 
 - Automatically detect player equipment with different authored body proportions and preserve its bone lengths and skin binding. Integrate matching physics assets, camera height, motion, slope/foot correction, grips, weapons and body attachment points.
 - Retarget foreign animations by source SK indices and matching target bone names. Adapt root motion by reference leg length and transfer recognized weapon-socket motion. Player targets are enabled by default; biped enemy targets remain opt-in through `enemy_targets = false` by default.
-- Keep retargeting coherent with overall scaling, including mounted players and the reported 0.3-scale grounding scene. Correct scaled bone-plane directions, mesh-bone area frames and BoneSpaceSkinPN normal output to resolve the reported 3.0-scale cloth stretching and twitching.
+- Improve compatibility between equipment retargeting and overall scaling: preserve mounted scale, correct grounding at small scales, and prevent stretched or unstable cloth when enlarged.
 - Add Chinese and English usage documentation, optional retargeting configuration and source-skeleton setup instructions. Retain pinned Cargo Git dependencies, static C/C++ runtime linking and the default silent build.
-- Promote the accepted dev.25 DLL unchanged. Embedded package/build identifiers retain dev.25; `v2.55.0` is a stable release. Reported player/equipment scenes passed human acceptance; enemy-to-enemy animation transfer has offline validation only.
+- Release v2.55.0 as stable. Enemy-to-enemy animation transfer remains experimental and disabled by default.
 
 
 ## 2.54.3 — equipment skeleton map coverage

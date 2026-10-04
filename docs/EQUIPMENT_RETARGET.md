@@ -2,7 +2,7 @@
 
 ## 使用方式
 
-本功能包含在 v2.55.0 正式版中。测试模型的装备比例、物理、握持和身体挂点已通过所报告场景的游戏内验收；其他模型需按自身资产验证。
+v2.55.0 支持自动检测玩家装备的骨架比例差异。
 
 装备加载后，DLL 自动读取 FLVER 蒙皮绑定中的参考骨架，与玩家动画参考骨架比较同名身体骨段的长度。检测到比例差异时，使用玩家动画驱动目标模型，保留模型自己的骨长与蒙皮绑定，并校准手臂参考姿态差异。首轮针对本地玩家的全身替换装备。
 
@@ -44,7 +44,7 @@ force_models = ["BD_M_FORCE_RETARGET"]
 
 ## English
 
-This feature is included in v2.55.0. Equipment proportions, physics, grips and body attachment points passed in-game acceptance in the reported test scenes. Other assets require validation with their own skeletons and physics.
+v2.55.0 supports automatic detection of different player-equipment proportions.
 
 **Automatic detection is enabled by default. No equipment list or `[retarget]` table is required.** Keep the existing global and player switches enabled. Retargeting does not require a SpEffect rule and can coexist with overall scaling rules.
 

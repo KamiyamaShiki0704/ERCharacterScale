@@ -1,14 +1,6 @@
-# v2.55.0 release validation
+# v2.55.0 validation
 
-The release promotes the accepted dev.25 DLL unchanged. Its embedded package version remains `2.55.0-dev.25` and build identifier is `er-2.55.0-dev.25-bone-space-normals`. The release tag is `v2.55.0`; source package metadata retains the accepted build version.
-
-- Release tests: 293 passed, 17 optional private-fixture/executable tests ignored by default.
-- Rustfmt, Clippy with warnings denied, 27 native layout checks, static-runtime dependency checks and silent native-host loading passed.
-- Original native-kernel replay and production callback checks cover scaled bone-plane, mesh-bone and bone-space normal behavior.
-- The user accepted the reported equipment proportions, physics, attachments, player animation transfer, mounted scaling, small-scale grounding and 3.0-scale cloth scenes during development.
-- Enemy-to-enemy animation transfer is disabled by default and has offline checks only. Acceptance covers reported scenes; separate FPS measurements were not reported for the final cloth fix.
-
-Run the public suite serially because native-hook tests share process-global hook state:
+The public Release suite contains 293 tests. Optional fixture and executable checks require locally supplied inputs. Native-hook tests share process-global hook state; run the suite serially.
 
 ```powershell
 cargo fmt --check
