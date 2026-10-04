@@ -203,6 +203,16 @@ pub(super) fn skin(r: *mut Registers, original: usize) -> usize {
     let root = context.checked_add(0x10).and_then(read_usize).unwrap_or(0);
     with_keys(&[root], || cloth_skin_normal_hook(r, original))
 }
+pub(super) fn simple_bone(r: *mut Registers, original: usize) -> usize {
+    let context = unsafe { (*r).rdx as usize };
+    let root = context.checked_add(0x10).and_then(read_usize).unwrap_or(0);
+    with_keys(&[root], || simple_mesh_bone::hook(r, original))
+}
+pub(super) fn bone_skin(r: *mut Registers, original: usize) -> usize {
+    let context = unsafe { (*r).rdx as usize };
+    let root = context.checked_add(0x10).and_then(read_usize).unwrap_or(0);
+    with_keys(&[root], || bone_space_skin::hook(r, original))
+}
 pub(super) fn mesh_pn(r: *mut Registers, original: usize) -> usize {
     let input = unsafe { (*r).r8 as usize };
     with_keys(&[input], || cloth_mesh_pn_hook(r, original))

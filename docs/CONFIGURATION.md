@@ -1,6 +1,6 @@
 # 配置体型缩放
 
-适用于 2.54.0。默认 DLL 名称为 `ERCharacterScale.dll`。文件是 DLL 同目录的 `ERCharacterScale.toml`，
+适用于 2.55.0。默认 DLL 名称为 `ERCharacterScale.dll`。文件是 DLL 同目录的 `ERCharacterScale.toml`，
 使用 UTF-8 编码，可以带 BOM。启动时读取一次；修改文件后重启游戏。
 配置中的 SpEffect 获得或失去仍会在游戏运行时改变倍率。
 
@@ -126,3 +126,17 @@ scale = 0.8
 `0`、负数、`nan`、`inf`，以及超出浮点表示能力而变成零或无穷大的输入无效。
 运行时仍会检查计算结果能否表示；发生溢出或非零尺寸下溢时拒绝相关写入，不会自动截断到某个倍率。
 取消配置上下限不代表游戏引擎在任意极端倍率下都能正常模拟。
+
+## 重定向开关
+
+装备比例重定向默认自动检测，不要求新增表；可用 `[retarget] enabled = false` 关闭，模型例外见 [装备重定向说明](EQUIPMENT_RETARGET.md)。
+
+跨角色动画默认只重定向到玩家。以下表可显式保留默认值：
+
+```toml
+[animation_retarget]
+enabled = true
+enemy_targets = false
+```
+
+`enemy_targets = true` 允许双足非玩家目标，并要求 `[enemies].enabled = true`。该选项独立于整体缩放规则，不影响敌人动画驱动玩家。源 SK 与动画加载要求见 [动画重定向说明](ANIMATION_RETARGET.md)。

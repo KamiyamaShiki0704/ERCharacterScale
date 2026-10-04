@@ -1,3 +1,5 @@
+mod bone_space_skin;
+mod simple_mesh_bone;
 mod units;
 use std::{
     cell::{Cell, RefCell},
@@ -838,6 +840,10 @@ enum AffineRangeFallbackAction {
 #[repr(align(16))]
 struct AlignedClothMatrix([f32; 16]);
 
+pub(crate) fn install_equipment_retarget() -> bool {
+    crate::equipment_retarget_native::install(MODULE_BASE.load(Ordering::Acquire))
+}
+
 pub fn install() -> bool {
     if INSTALL_ATTEMPTED.swap(true, Ordering::AcqRel) {
         return HOOKS_READY.load(Ordering::Acquire);
@@ -1000,6 +1006,31 @@ pub fn install() -> bool {
         return false;
     };
     let _ = Box::leak(Box::new(skin_normal_hook));
+
+    let simple_bone_hook = unsafe {
+        hook_closure_retn(
+            base + simple_mesh_bone::ENTRY,
+            units::simple_bone,
+            CallbackOption::None,
+            HookFlags::empty(),
+        )
+    };
+    let Ok(simple_bone_hook) = simple_bone_hook else {
+        return false;
+    };
+    let _ = Box::leak(Box::new(simple_bone_hook));
+    let bone_skin_hook = unsafe {
+        hook_closure_retn(
+            base + bone_space_skin::ENTRY,
+            units::bone_skin,
+            CallbackOption::None,
+            HookFlags::empty(),
+        )
+    };
+    let Ok(bone_skin_hook) = bone_skin_hook else {
+        return false;
+    };
+    let _ = Box::leak(Box::new(bone_skin_hook));
 
     if ENABLE_AFFINE_FALLBACK_HOOKS {
         let affine_single_hook = unsafe {
@@ -1435,6 +1466,12 @@ fn validate_runtime(base: usize) -> Result<(), &'static str> {
     }
     if !validate_skin_normal_runtime(base) {
         return Err("SkinPN execution layout mismatch");
+    }
+    if !simple_mesh_bone::validate(base) {
+        return Err("SimpleMeshBoneDeform execution layout mismatch");
+    }
+    if !bone_space_skin::validate(base) {
+        return Err("BoneSpaceSkinPN execution layout mismatch");
     }
     if !bytes_equal(
         base + ER_CLOTH_MESH_PN_FLOAT_RVA,
@@ -2441,9 +2478,12 @@ fn cloth_inner_commit_hook(registers: *mut Registers, original: usize) -> usize 
         .load(Ordering::Acquire);
     let requested_scale = current_scale();
     let target_slot = target_solver_source_slot(inner, current_transform, update_context);
+    let mut retarget_input =
+        crate::equipment_retarget_native::solver_input(inner, update_context, current_transform);
     let solver_source_eligible = ENABLE_EXTRA_CLOTH_SOLVER_SOURCE_TRANSLATION
         && target_slot.is_some()
-        && valid_active_scale(requested_scale);
+        && valid_active_scale(requested_scale)
+        && retarget_input.is_none();
     let mut solver_scratch =
         SOLVER_SOURCE_SCRATCH.with(|scratch| std::mem::take(&mut *scratch.borrow_mut()));
     let solver_source_span = if solver_source_eligible {
@@ -2518,13 +2558,19 @@ fn cloth_inner_commit_hook(registers: *mut Registers, original: usize) -> usize 
 
     // A failed private preparation discards only scratch. The native fallback
     // receives the untouched canonical context; never retry live mutations.
-    let native_context = solver_source_span.map_or(update_context, |span| span.0);
+    let native_context = retarget_input
+        .as_mut()
+        .map(|input| input.context())
+        .unwrap_or_else(|| solver_source_span.map_or(update_context, |span| span.0));
     if solver_source_span.is_some() {
         unit_state
             .cloth_solver_private_context_calls
             .fetch_add(1, Ordering::Relaxed);
     }
     let result = unsafe { original(inner, event, current_transform, native_context, force_main) };
+    if let Some(input) = &retarget_input {
+        input.completed();
+    }
 
     if let Some((_, transforms, count, writes)) = solver_source_span {
         unit_state

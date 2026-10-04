@@ -8,6 +8,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod animation_retarget;
+mod animation_retarget_native;
+mod animation_skeleton;
 mod body_scale_port;
 mod cloth_collider_rotation;
 mod cloth_collider_rotation_hook;
@@ -18,12 +21,16 @@ mod cloth_mesh_scale;
 mod cloth_owner_scope;
 mod cloth_render_scale;
 mod config;
+pub mod equipment_retarget;
+mod equipment_retarget_native;
+mod equipment_retarget_pose;
 mod havok_probe;
 mod havok_shape_scale;
 mod hkx_collidable_probe;
 mod log;
 mod memory_query;
 mod model_matrix_scale;
+mod mounted_scale;
 mod nr_probe;
 mod ragdoll_motion_scale;
 mod ragdoll_shape_scale;
@@ -39,7 +46,7 @@ use fromsoftware_shared::{FromStatic, SharedTaskImpExt};
 const DLL_PROCESS_DETACH: u32 = 0;
 const DLL_PROCESS_ATTACH: u32 = 1;
 
-const BUILD_MODE: &str = "er-2.54.3-rc.1-equipment-source-map-coverage";
+const BUILD_MODE: &str = "er-2.55.0-dev.25-bone-space-normals";
 const ENABLE_SYNC_DIAGNOSTIC: bool = log::ENABLED;
 const SCALE_COLLISION: bool = true;
 const SCALE_WEIGHT: bool = false;
@@ -378,7 +385,13 @@ fn run_task_thread(hmodule: usize) {
         return;
     }
     let hook_started = Instant::now();
+    equipment_retarget_native::initialize(config.retarget.clone());
     let body_scale_hooks_ready = body_scale_port::install();
+    if body_scale_hooks_ready && !body_scale_port::install_equipment_retarget() {
+        log::line(format_args!(
+            "[ERCS-RETARGET] native layout guard rejected equipment retargeting"
+        ));
+    }
     let hook_install_micros = hook_started.elapsed().as_micros();
     log::line(format_args!(
         "[player-scale-no-bone] ER body-scale port install_ready={body_scale_hooks_ready}"
@@ -390,6 +403,16 @@ fn run_task_thread(hmodule: usize) {
             "[player-scale-no-bone] runtime rejected; no upstream task access"
         ));
         return;
+    }
+    if config.player.enabled && !mounted_scale::install(body_scale_port::image_base()) {
+        log::line(format_args!(
+            "[ERCS-MOUNT] native location guard rejected rider scale correction"
+        ));
+    }
+    if (config.player.enabled && config.animation_retarget.allows(config::TargetKind::Player))
+        || (config.enemies.enabled && config.animation_retarget.allows(config::TargetKind::Enemy))
+    {
+        let _ = animation_retarget_native::install(body_scale_port::image_base());
     }
     if !unit_runtime::entry_state_supported(body_scale_port::image_base()) {
         log::line(format_args!(
@@ -488,6 +511,11 @@ fn run_nightreign_readonly_probe(exe_path: &str) {
 
 fn apply_player_scale(player: &mut PlayerIns, state: &mut ScaleState, requested_scale: f32) -> f32 {
     let applied_scale = apply_character_scale(&mut player.chr_ins, state, requested_scale);
+    equipment_retarget_native::refresh(
+        player as *mut PlayerIns as usize,
+        applied_scale,
+        state.task_frames,
+    );
     if SCALE_HKNP_CAPSULE_SHAPE {
         havok_shape_scale::scale_player_hknp_capsule_shape(
             player,

@@ -12,6 +12,10 @@ enabled = true
 [enemies]
 enabled = false
 
+[animation_retarget]
+enabled = true
+enemy_targets = false # Opt in to biped enemy animation targets; independent of scale rules.
+
 [[rules]]
 name = "player-effect-21202000"
 target = "player"

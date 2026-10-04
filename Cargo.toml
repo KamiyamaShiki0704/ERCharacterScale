@@ -1,6 +1,6 @@
 [package]
 name = "player-scale-no-bone"
-version = "2.54.3-rc.1"
+version = "2.55.0-dev.25"
 edition = "2024"
 publish = false
 license = "MIT"
@@ -12,6 +12,8 @@ default = []
 diagnostics = []
 
 [dependencies]
+flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
+glam = "=0.33.6"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8.23"
 eldenring = { git = "https://github.com/KamiyamaShiki0704/fromsoftware-rs", rev = "02fa5681e27fd2ecd9da79d34aef9fae96805539" }

@@ -4,7 +4,7 @@
 
 通过 TOML 配置 Elden Ring 玩家与其他角色的整体体型比例，支持 SpEffect 触发和无条件缩放。
 
-[下载 v2.54.3](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.54.3) · [配置说明](docs/CONFIGURATION.md) · [版本记录](CHANGELOG.md)
+[下载 v2.55.0](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.0) · [配置说明](docs/CONFIGURATION.md) · [版本记录](CHANGELOG.md)
 
 ## 功能
 
@@ -13,12 +13,14 @@
 - 按 `cxxxx` 模型编号、NPC 参数编号或事件实体编号筛选，分别设置不同倍率。
 - 使用单位自身的 SpEffect 触发缩放，或通过 `constant` 模式始终应用倍率。
 - 保留布料模拟。
+- 自动检测玩家装备的骨架比例差异，使用模型自身骨长播放动画，并适配物理、镜头、实际位移、手脚 IK、武器与身体挂点。
+- 按同名骨骼将其他角色的动画重定向到玩家，保留目标比例并适配 Root Motion 与武器骨骼运动。
 
 ## 安装
 
 适用于 **Windows x64、离线 Elden Ring WW2.7.1.0 / game1.17.1**。其他程序版本需要另行验证。
 
-1. 从 [Release 页面](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.54.3) 下载 `ERCharacterScale-v2.54.3-windows-x64.zip`。
+1. 从 [Release 页面](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.0) 下载 `ERCharacterScale-v2.55.0-windows-x64.zip`。
 2. 将 `ERCharacterScale.dll` 和 `ERCharacterScale.toml` 放在同一目录，并使用现有 DLL 加载器加载该 DLL。
 3. 按需要编辑 TOML，然后启动游戏。之后修改配置文件，需要重启游戏生效。
 
@@ -42,6 +44,14 @@
 - [非玩家单位减半](examples/ERCharacterScale.enemies-half.toml)：保留默认玩家效果规则，支持的非玩家单位固定 0.5 倍。
 
 筛选字段、规则顺序和配置错误处理见 [完整配置说明](docs/CONFIGURATION.md)。
+
+## 重定向
+
+[装备骨架重定向](docs/EQUIPMENT_RETARGET.md) 默认自动检测，无需填写装备列表。模型必须保留自己的参考骨架和蒙皮绑定，头发／衣服物理资产也应按新比例制作。可通过 `[retarget]` 关闭或设置模型例外。
+
+[跨角色动画重定向](docs/ANIMATION_RETARGET.md) 默认启用玩家目标。使用者自行安排动画加载与调用，并保留动画的原始来源信息；DLL 从源 SK 取得索引与骨名对应，再映射到目标骨架。源 SK 可放在 DLL 旁的 `skeletons/` 目录。敌人到敌人的重定向默认关闭，可通过 `[animation_retarget] enemy_targets = true` 选择启用双足目标。
+
+[最小重定向配置](examples/ERCharacterScale.retarget.toml) 可用于单独启用重定向而不设置整体缩放规则。
 
 ## 从源码构建
 

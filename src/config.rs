@@ -39,6 +39,30 @@ pub struct Config {
     pub player: TargetSwitch,
     pub enemies: TargetSwitch,
     pub rules: Vec<Rule>,
+    #[serde(default)]
+    pub retarget: crate::equipment_retarget_native::Settings,
+    #[serde(default)]
+    pub animation_retarget: AnimationRetarget,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AnimationRetarget {
+    pub enabled: bool,
+    pub enemy_targets: bool,
+}
+impl Default for AnimationRetarget {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            enemy_targets: false,
+        }
+    }
+}
+impl AnimationRetarget {
+    pub fn allows(&self, target: TargetKind) -> bool {
+        self.enabled && (target == TargetKind::Player || self.enemy_targets)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -89,6 +113,7 @@ impl Config {
                 parsed.version
             ));
         }
+        parsed.retarget.validate()?;
         let mut names = HashSet::new();
         for rule in &parsed.rules {
             let error = |reason| format!("rule {:?}: {reason}", rule.name);
@@ -368,6 +393,31 @@ mod tests {
         format!(
             "version = 1\nenabled = true\n[player]\nenabled = true\n[enemies]\nenabled = true\n{rules}"
         )
+    }
+
+    #[test]
+    fn enemy_animation_targets_are_opt_in_without_disabling_scaling_or_player() {
+        let base = text(&rule("enemy", "enemy", "mode='constant'\nscale=0.5"));
+        for (settings, player, enemy) in [
+            ("", true, false),
+            ("[animation_retarget]\nenabled=true", true, false),
+            ("[animation_retarget]\nenemy_targets=true", true, true),
+            (
+                "[animation_retarget]\nenabled=false\nenemy_targets=true",
+                false,
+                false,
+            ),
+        ] {
+            let config = Config::parse(&format!("{base}\n{settings}")).unwrap();
+            assert_eq!(config.animation_retarget.allows(TargetKind::Player), player);
+            assert_eq!(config.animation_retarget.allows(TargetKind::Enemy), enemy);
+            assert_eq!(
+                config
+                    .resolve(facts(TargetKind::Enemy, 100), |_| panic!("constant scale"))
+                    .scale,
+                0.5
+            );
+        }
     }
     fn rule(name: &str, target: &str, more: &str) -> String {
         format!("[[rules]]\nname = {name:?}\ntarget = {target:?}\n{more}\n")

@@ -1,3 +1,21 @@
+# v2.55.0 release validation
+
+The release promotes the accepted dev.25 DLL unchanged. Its embedded package version remains `2.55.0-dev.25` and build identifier is `er-2.55.0-dev.25-bone-space-normals`. The release tag is `v2.55.0`; source package metadata retains the accepted build version.
+
+- Release tests: 293 passed, 17 optional private-fixture/executable tests ignored by default.
+- Rustfmt, Clippy with warnings denied, 27 native layout checks, static-runtime dependency checks and silent native-host loading passed.
+- Original native-kernel replay and production callback checks cover scaled bone-plane, mesh-bone and bone-space normal behavior.
+- The user accepted the reported equipment proportions, physics, attachments, player animation transfer, mounted scaling, small-scale grounding and 3.0-scale cloth scenes during development.
+- Enemy-to-enemy animation transfer is disabled by default and has offline checks only. Acceptance covers reported scenes; separate FPS measurements were not reported for the final cloth fix.
+
+Run the public suite serially because native-hook tests share process-global hook state:
+
+```powershell
+cargo fmt --check
+cargo test --release --locked -- --test-threads=1
+cargo clippy --release --locked --all-targets -- -D warnings
+```
+
 # Embedded runtime — 2.54.0
 
 The default Cargo configuration builds x86_64-pc-windows-msvc with `+crt-static`.
@@ -171,7 +189,7 @@ The default suite uses owned synthetic memory and mock native callbacks. It does
 not open a game process. Game-derived geometry, runtime dumps, original executables
 and private development records are not distributed.
 
-Eight integration tests retain their assertions but load local fixtures at run
+Optional integration tests retain their assertions but load local fixtures at run
 time. To run them, set `ER_CHARACTER_SCALE_FIXTURES` to a directory containing your
 own compatible capture fixtures, then run the selected test with `-- --ignored`.
 The separate executable-layout check uses `ERPS_COMPAT_EXE` to name the matching

@@ -1,0 +1,21 @@
+# Automatic retargeting example for v2.55.0.
+# No retarget table or equipment names are required.
+version = 1
+enabled = true
+rules = []
+
+[player]
+enabled = true
+
+[enemies]
+enabled = false
+
+[animation_retarget]
+enabled = true
+enemy_targets = false # Enemy-to-enemy animation retargeting is opt-in.
+
+# Optional overrides only:
+# [retarget]
+# enabled = false              # Disable automatic retargeting.
+# exclude_models = ["BD_M_..."] # Keep this internal model on the native path.
+# force_models = ["BD_M_..."]   # Bypass detection for this model, not validation.

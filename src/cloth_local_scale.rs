@@ -1084,7 +1084,22 @@ fn capture_constraint_dimensions(baseline: &mut DimensionObjectBaseline, set: us
             Some((0x10, &[0x04, 0x08, 0x0C], DimensionPower::Linear, true))
         }
         ClothConstraintKind::Transition => Some((0x10, &[0x0C], DimensionPower::Linear, true)),
-        ClothConstraintKind::BonePlanes => Some((0x20, &[0x0C], DimensionPower::Linear, false)),
+        ClothConstraintKind::BonePlanes => {
+            // ER 15C8BC0 / 15C8D20 multiply equation.xyz by the transform-set
+            // basis, then use it as a unit normal without normalization. That
+            // basis already contains the owned body's uniform scale. Cancel
+            // only that factor in xyz; equation.w remains a scaled distance.
+            // Otherwise the correction gains s^2 and opposing planes diverge
+            // for enlarged bodies. Preserve authored normal/indices/stiffness.
+            let (elements, count) =
+                baseline.capture_array(set, 0x28, 0x30, 0x20, MAX_CONSTRAINT_ELEMENTS)?;
+            for index in 0..count {
+                let element = elements.checked_add(index.checked_mul(0x20)?)?;
+                baseline.capture_vec3(element, DimensionPower::Inverse)?;
+                baseline.capture_field(element + 0x0C, DimensionPower::Linear, false)?;
+            }
+            return Some(());
+        }
         ClothConstraintKind::BendLink => Some((0x14, &[0x04, 0x08], DimensionPower::Linear, false)),
         ClothConstraintKind::BendStiffness => {
             baseline.capture_field(set.checked_add(0x38)?, DimensionPower::Squared, false)?;
@@ -1568,6 +1583,72 @@ mod tests {
                 None
             );
         }
+    }
+
+    #[test]
+    fn bone_plane_capture_keeps_world_normal_unit_across_scale_transitions() {
+        let _module_guard = body_scale_port::MODULE_TEST_LOCK.lock().unwrap();
+        let original = [
+            0.6f32.to_bits(),
+            (-0.8f32).to_bits(),
+            0,
+            (-0.25f32).to_bits(),
+            0x000a_0003,
+            0.85f32.to_bits(),
+            0x1234_5678,
+            0x8765_4321,
+        ];
+        let mut plane = original;
+        let mut set = [0usize; 8];
+        set[0] = 0x2D82E78;
+        set[5] = plane.as_mut_ptr() as usize;
+        set[6] = 1;
+        let mut baseline = empty_test_baseline(set.as_ptr() as usize);
+        capture_constraint_dimensions(&mut baseline, set.as_ptr() as usize).unwrap();
+        for scale in [3.0f32, 3.0, 0.3, 0.55, 1.12, 10.0, 1.0] {
+            assert!(baseline.apply(scale).is_some());
+            for i in 0..3 {
+                assert!(
+                    (f32::from_bits(plane[i]) * scale - f32::from_bits(original[i])).abs() < 1e-6,
+                    "body scale must cancel in native transformed plane normal: scale={scale}"
+                );
+            }
+            assert!((f32::from_bits(plane[3]) - f32::from_bits(original[3]) * scale).abs() < 1e-6);
+            assert_eq!(
+                plane[4..],
+                original[4..],
+                "indices, stiffness and padding changed"
+            );
+        }
+        assert_eq!(plane, original);
+        set[6] = 0;
+        assert_eq!(set[6], 0);
+        assert!(baseline.apply(3.0).is_none(), "stale array must reject");
+        assert_eq!(plane, original);
+    }
+
+    #[test]
+    #[ignore = "requires private bone plane fixture and explicit replay output directory"]
+    fn bone_plane_private_fixture_exports_production_scaled_arrays() {
+        let _module_guard = body_scale_port::MODULE_TEST_LOCK.lock().unwrap();
+        let original = crate::test_fixtures::bytes("bone-planes.bin");
+        assert!(!original.is_empty() && original.len().is_multiple_of(32));
+        let mut planes = original.clone();
+        let mut set = [0usize; 8];
+        set[0] = 0x2D82E78;
+        set[5] = planes.as_mut_ptr() as usize;
+        set[6] = planes.len() / 32;
+        let mut baseline = empty_test_baseline(set.as_ptr() as usize);
+        capture_constraint_dimensions(&mut baseline, set.as_ptr() as usize).unwrap();
+        let out =
+            std::path::PathBuf::from(std::env::var_os("ER_CHARACTER_SCALE_REPLAY_OUTPUT").unwrap());
+        assert!(out.is_dir());
+        for scale in [0.3f32, 0.55, 0.85, 1.0, 1.12, 2.0, 3.0, 10.0] {
+            assert!(baseline.apply(scale).is_some());
+            std::fs::write(out.join(format!("bone-planes-{scale}.bin")), &planes).unwrap();
+        }
+        baseline.apply(1.0).unwrap();
+        assert_eq!(planes, original);
     }
 
     fn volume_fixture_arrays(text: &str) -> Vec<Vec<u8>> {

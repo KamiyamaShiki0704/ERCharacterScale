@@ -510,7 +510,9 @@ impl Runtime {
         if self.api.is_some() {
             addresses.extend(memory_query::scoped(|| candidates(world, player_address)));
         }
+        let mut mounted_location = 0;
         let mut pending = Vec::new();
+        let mut animation_units = Vec::new();
         let mut consumers = HashMap::new();
         if self.api.is_some() {
             // Include even excluded consumers in read-only shared resource checks.
@@ -552,6 +554,9 @@ impl Runtime {
             } else {
                 config::TargetKind::Enemy
             };
+            if self.config.animation_retarget.allows(kind) {
+                animation_units.push(identity);
+            }
             let mut relation_unavailable = false;
             let result = identity.resolve(kind, &self.config, || {
                 let relation = self
@@ -705,6 +710,9 @@ impl Runtime {
             } else {
                 apply()
             };
+            if is_player && applied != 1.0 {
+                mounted_location = read::<usize>(identity.control + 0x2f8).unwrap_or(0);
+            }
             let effective = config::Selection {
                 scale: applied,
                 ..selection
@@ -730,11 +738,18 @@ impl Runtime {
                 record.state.last_selection = Some(effective);
             }
         }
+        if self.config.animation_retarget.enabled {
+            crate::animation_retarget_native::refresh(&animation_units);
+        }
+        crate::mounted_scale::publish(mounted_location);
         body_scale_port::refresh_unit_registry();
         TickStatus::Ready
     }
 
     pub(crate) fn suspend(&mut self) {
+        crate::mounted_scale::publish(0);
+        crate::animation_retarget_native::suspend();
+        crate::equipment_retarget_native::suspend();
         self.records.retain(|_, record| {
             body_scale_port::detach_unit(&record.hooks);
             record.state.cached_binding = None;
@@ -744,6 +759,8 @@ impl Runtime {
     }
 
     pub fn clear(&mut self) {
+        crate::mounted_scale::publish(0);
+        crate::animation_retarget_native::suspend();
         for (_, mut record) in self.records.drain() {
             release_record(&mut record);
         }
