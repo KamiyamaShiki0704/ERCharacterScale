@@ -108,37 +108,34 @@ fn capture(session: Arc<Session>, slot: usize, base: usize) -> Option<Route> {
     if index < 0 || index as usize >= bone_count {
         return None;
     }
-    let name = pose::text(&read, ptr(bones + index as usize * 64 + 0x20)?, true)?;
-    let mut source_anchor = session.source_bones.iter().position(|b| b.name == name)?;
-    let target_anchor = loop {
-        if let Some(i) = session
-            .mesh_bones
-            .iter()
-            .position(|b| b.name == session.source_bones[source_anchor].name)
-        {
-            break i;
-        }
-        source_anchor = session.source_bones[source_anchor].parent?;
-    };
-    let name = &session.source_bones[source_anchor].name;
-    // Resolve by name once. L/R_Weapon need not exist in the clothing FLVER;
-    // their nearest common Hand ancestor carries the original weapon offset.
-    let mut native_anchor = None;
-    for i in 0..bone_count {
-        if pose::text(&read, ptr(bones + i * 64 + 0x20)?, true)?.as_str() == name {
-            native_anchor = Some(i);
-            break;
-        }
-    }
+    let names = (0..bone_count)
+        .map(|i| pose::text(&read, ptr(bones + i * 64 + 0x20)?, true))
+        .collect::<Option<Vec<_>>>()?;
+    let parents = (0..bone_count)
+        .map(|i| {
+            let p = i16::from_le_bytes(pose::bytes(&read, bones + i * 64 + 0x2C)?);
+            if p < -1 || p as usize >= bone_count && p != -1 {
+                return None;
+            }
+            Some((p >= 0).then_some(p as usize))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let anchor = crate::equipment_retarget::attachment_anchor(
+        &session.source_bones,
+        &session.mesh_bones,
+        &names,
+        &parents,
+        index as usize,
+    )?;
     Some(Route {
         session,
         node,
         slot,
         record,
         record_header,
-        anchor_world: world_array + native_anchor? * 48,
-        source_anchor,
-        target_anchor,
+        anchor_world: world_array + anchor.native * 48,
+        source_anchor: anchor.source,
+        target_anchor: anchor.target,
         array_count: array + 0x68,
         skeleton_count: skeleton,
         count: bone_count as u16,

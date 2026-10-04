@@ -42,7 +42,7 @@ fn ordinary_two_hand_weapons_keep_their_grip_and_cached_flags_remain_live() {
             style
         );
         assert!(
-            warm.get() <= 17,
+            warm.get() <= 18,
             "per-frame lookup unexpectedly grew: {}",
             warm.get()
         );
@@ -125,6 +125,7 @@ fn memory(dual: bool, style: u32) -> std::collections::BTreeMap<usize, u8> {
     put(0x6040, &[0; 24]);
     put(0x6040, &3230000u32.to_le_bytes());
     put(0x6048, &0x100u64.to_le_bytes());
+    put(0x61f0, &[0, 10]);
     put(0x627c, &[if dual { 2 } else { 0 }]);
     put(0x6900, &3230000u32.to_le_bytes());
     put(0x6904, &0u32.to_le_bytes());
@@ -133,15 +134,65 @@ fn memory(dual: bool, style: u32) -> std::collections::BTreeMap<usize, u8> {
 
 #[test]
 fn paired_weapon_in_both_hand_styles_must_not_raise_either_arm() {
-    independent_arm_regression(true, false);
+    independent_arm_regression(true, false, false);
 }
 
 #[test]
 fn empty_hand_in_both_hand_styles_must_not_raise_either_arm() {
-    independent_arm_regression(false, true);
+    independent_arm_regression(false, true, false);
 }
 
-fn independent_arm_regression(paired: bool, empty: bool) {
+#[test]
+fn independent_basic_moveset_must_not_raise_either_arm() {
+    independent_arm_regression(false, false, true);
+}
+
+#[test]
+fn identical_basic_motion_ids_keep_hands_independent_in_both_styles() {
+    for style in [2, 3] {
+        let mut m = memory(false, style);
+        m.insert(0x61f0, 73);
+        m.insert(0x61f1, 73);
+        let mut cache = GripCache::default();
+        assert_eq!(cache.style(&|a, b| from_memory(&m, a, b), 0x1000, 0), 0);
+        // Reloading the motion category must not leave a stale cached policy.
+        m.insert(0x61f1, 74);
+        assert_eq!(cache.style(&|a, b| from_memory(&m, a, b), 0x1000, 0), style);
+    }
+}
+
+#[test]
+#[ignore = "requires private ERCS_RETARGET_LOWER_BODY fixture directory"]
+fn captured_independent_two_hand_weapon_does_not_enable_shared_grip() {
+    let root = std::path::PathBuf::from(std::env::var("ERCS_RETARGET_LOWER_BODY").unwrap());
+    let raw = std::fs::read(root.join("grip-memory.bin")).unwrap();
+    let mut blocks = Vec::new();
+    let mut at = 0;
+    while at < raw.len() {
+        let address = usize::from_le_bytes(raw[at..at + 8].try_into().unwrap());
+        let n = usize::from_le_bytes(raw[at + 8..at + 16].try_into().unwrap());
+        blocks.push((address, raw[at + 16..at + 16 + n].to_vec()));
+        at += 16 + n;
+    }
+    let read = |address: usize, output: &mut [u8]| {
+        let Some((start, bytes)) = blocks.iter().find(|(start, bytes)| {
+            address >= *start && address - start + output.len() <= bytes.len()
+        }) else {
+            return false;
+        };
+        output.copy_from_slice(&bytes[address - start..address - start + output.len()]);
+        true
+    };
+    // Captured local player uses weapon 89000000 in right two-hand style,
+    // but the actual moveset keeps the hands independent.
+    assert_eq!(
+        GripCache::default().style(&read, 0x1bd85f53080, 0x7ff7a2150000),
+        0,
+        "independent-hand moveset incorrectly enabled shared grip"
+    );
+}
+
+fn independent_arm_regression(paired: bool, empty: bool, same_motion: bool) {
     let mut source = Vec::new();
     for (side, x) in [("L", 0.3), ("R", -0.3)] {
         let start = source.len();
@@ -169,6 +220,10 @@ fn independent_arm_regression(paired: bool, empty: bool) {
     let mut cache = GripCache::default();
     for style in [2, 3] {
         let mut m = memory(paired, style);
+        if same_motion {
+            m.insert(0x61f0, 73);
+            m.insert(0x61f1, 73);
+        }
         if empty {
             // Captured left two-hand empty slot resolves to weapon 110000,
             // whose isDualBlade flag is unset. Both sides must stay independent.
@@ -190,7 +245,7 @@ fn independent_arm_regression(paired: bool, empty: bool) {
         let input: Vec<_> = source.iter().map(|b| b.reference).collect();
         plan.prepare(&input, 0, &mut frame).unwrap();
         let expected = frame.outputs().unwrap().model.to_vec();
-        plan.constrain(&mut frame, cache.style(&read, 0x1000, 0), false)
+        plan.constrain(&mut frame, cache.style(&read, 0x1000, 0), None)
             .unwrap();
         for (i, (a, b)) in frame
             .outputs()

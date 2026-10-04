@@ -125,26 +125,28 @@ fn capture(session: Arc<Session>, base: usize) -> Option<Route> {
     let names = (0..count as usize)
         .map(|i| pose::text(&read, ptr(bones + i * 64 + 0x20)?, true))
         .collect::<Option<Vec<_>>>()?;
+    let parents = (0..count as usize)
+        .map(|i| {
+            let p = i16::from_le_bytes(pose::bytes(&read, bones + i * 64 + 0x2C)?);
+            if p < -1 || p >= count as i16 {
+                return None;
+            }
+            Some((p >= 0).then_some(p as usize))
+        })
+        .collect::<Option<Vec<_>>>()?;
     let entries = (0..size as usize)
         .map(|i| -> Option<Record> {
             let header = pose::bytes::<16>(&read, records + i * 80)?;
             let bone = i32::from_le_bytes(header[4..8].try_into().ok()?);
-            let name = names.get(usize::try_from(bone).ok()?)?;
-            let mut source = session.source_bones.iter().position(|b| b.name == *name)?;
-            let weapon = session.mesh_plan.weapon_attachment_source(source);
-            let target = loop {
-                if let Some(t) = session
-                    .mesh_bones
-                    .iter()
-                    .position(|b| b.name == session.source_bones[source].name)
-                {
-                    break t;
-                }
-                source = session.source_bones[source].parent?;
-            };
-            let native = names
-                .iter()
-                .position(|n| *n == session.source_bones[source].name)?;
+            let resolved = crate::equipment_retarget::attachment_anchor(
+                &session.source_bones,
+                &session.mesh_bones,
+                &names,
+                &parents,
+                usize::try_from(bone).ok()?,
+            )?;
+            let (source, target, native) = (resolved.source, resolved.target, resolved.native);
+            let weapon = resolved.weapon || session.mesh_plan.weapon_attachment_source(source);
             let ratio = session.mesh_plan.attachment_offset_ratio(target)?;
             Some(Record {
                 header,

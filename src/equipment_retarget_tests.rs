@@ -61,6 +61,61 @@ fn weapon_grip_tracks_shorter_fingers_instead_of_preserving_old_wrist_offset() {
 }
 
 #[test]
+fn retained_weapon_bones_use_the_calibrated_hand_and_keep_animated_weapon_motion() {
+    let mut source = vec![bone("R_Hand", None, DVec3::Y)];
+    let fingers = append_fingers(&mut source, 0, "R", 1.0);
+    let weapon = source.len();
+    source.push(bone("R_Weapon", Some(0), DVec3::new(0.14, 0.03, 0.05)));
+    let child = source.len();
+    source.push(bone("WeaponTip", Some(weapon), DVec3::X));
+    let mut target = source.clone();
+    for i in fingers {
+        target[i].reference.translation *= 0.5;
+    }
+    target[weapon].reference.translation *= 2.0;
+    target[weapon].reference.rotation = DQuat::from_rotation_z(0.4);
+    let plan = Plan::new(source.clone(), target, &[]).unwrap();
+    let mut frame = plan.new_frame();
+    for step in 0..20 {
+        let mut input = pose(&source);
+        input[weapon].rotation = DQuat::from_rotation_y(step as f64 * 0.05);
+        plan.prepare(&input, step, &mut frame).unwrap();
+        let hand = plan.attachment_pose(0, &frame).unwrap();
+        for index in [weapon, child] {
+            let expected = hand * frame.source_world[0].inverse() * frame.source_world[index];
+            matrix_near(plan.attachment_pose(index, &frame).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
+fn native_only_dummy_helpers_follow_the_nearest_common_parent() {
+    let source = vec![
+        bone("Master", None, DVec3::ZERO),
+        bone("R_Hand", Some(0), DVec3::Y),
+        bone("R_Weapon", Some(1), DVec3::X),
+    ];
+    let target = source[..2].to_vec();
+    let names = ["Master", "R_Hand", "R_Weapon", "NativePropOnly"].map(str::to_owned);
+    let parents = [None, Some(0), Some(1), Some(2)];
+    let resolved = attachment_anchor(&source, &target, &names, &parents, 3).unwrap();
+    assert_eq!(
+        resolved,
+        AttachmentAnchor {
+            source: 1,
+            target: 1,
+            native: 1,
+            weapon: true
+        }
+    );
+    let mut invalid = parents;
+    invalid[3] = Some(3);
+    assert!(attachment_anchor(&source, &target, &names, &invalid, 3).is_none());
+    assert!(attachment_anchor(&source, &target, &names, &parents, 10).is_none());
+    assert!(attachment_anchor(&source, &target, &names, &parents[..2], 3).is_none());
+}
+
+#[test]
 fn two_hand_grips_remain_coherent_with_different_palm_sizes_and_finger_motion() {
     let mut source = vec![
         bone("L_UpperArm", None, DVec3::new(-0.3, 1.0, 0.0)),
@@ -96,7 +151,7 @@ fn two_hand_grips_remain_coherent_with_different_palm_sizes_and_finger_motion() 
             let so = frame.source_world[other];
             let desired =
                 attachment_frame(sm, plan.attachment_pose(main, &frame).unwrap(), sm, so).unwrap();
-            plan.constrain(&mut frame, style, false).unwrap();
+            plan.constrain(&mut frame, style, None).unwrap();
             matrix_near(plan.attachment_pose(other, &frame).unwrap(), desired);
             for (local, b) in frame.target_local.iter().zip(&target) {
                 assert_eq!(local.translation, b.reference.translation);
@@ -132,7 +187,7 @@ fn two_hand_constraints_preserve_animated_grip_without_stretching_new_arms() {
                 + frame.source_world[other].w_axis.truncate()
                 - frame.source_world[main].w_axis.truncate();
             let original_main = frame.target_world[main];
-            plan.constrain(&mut frame, style, false).unwrap();
+            plan.constrain(&mut frame, style, None).unwrap();
             assert!(
                 frame.target_world[other]
                     .w_axis
@@ -148,7 +203,7 @@ fn two_hand_constraints_preserve_animated_grip_without_stretching_new_arms() {
             // Rebuilding from animation never accumulates the correction.
             let first = frame.target_world.clone();
             plan.prepare(&pose, 8, &mut frame).unwrap();
-            plan.constrain(&mut frame, style, false).unwrap();
+            plan.constrain(&mut frame, style, None).unwrap();
             for (a, b) in frame.target_world.iter().zip(first) {
                 matrix_near(*a, b);
             }
@@ -157,7 +212,7 @@ fn two_hand_constraints_preserve_animated_grip_without_stretching_new_arms() {
     let pose: Vec<_> = source.iter().map(|b| b.reference).collect();
     plan.prepare(&pose, 9, &mut frame).unwrap();
     let before = frame.target_world.clone();
-    plan.constrain(&mut frame, 1, false).unwrap();
+    plan.constrain(&mut frame, 1, None).unwrap();
     assert_eq!(frame.target_world, before);
 }
 
@@ -194,11 +249,34 @@ fn foot_constraint_keeps_native_contact_height_with_shorter_legs() {
     let source_foot = frame.source_world[2].w_axis.truncate();
     let normal = frame.source_rotation[2] * DVec3::Y;
     let contact = source_foot - normal * 0.15;
-    plan.constrain(&mut frame, 0, true).unwrap();
+    plan.constrain(&mut frame, 0, Some(normal)).unwrap();
     let new_contact = frame.target_world[2].w_axis.truncate() - normal * 0.12;
     assert!((new_contact - contact).dot(normal).abs() < 1e-8);
     for (local, bone) in frame.target_local.iter().zip(&target) {
         assert_eq!(local.translation, bone.reference.translation);
+    }
+}
+
+#[test]
+fn foot_animation_rotation_does_not_change_the_measured_ground_plane() {
+    let source = vec![
+        bone("L_Thigh", None, DVec3::Y),
+        bone("L_Calf", Some(0), DVec3::new(0.1, -0.45, 0.0)),
+        bone("L_Foot", Some(1), DVec3::new(-0.1, -0.4, 0.0)),
+    ];
+    let mut target = source.clone();
+    for bone in &mut target {
+        bone.reference.translation *= 0.8;
+    }
+    let plan = Plan::new(source.clone(), target, &[]).unwrap();
+    let mut frame = plan.new_frame();
+    for angle in [-1.2, -0.4, 0.0, 0.7, 1.2] {
+        let mut input = pose(&source);
+        input[2].rotation = DQuat::from_rotation_x(angle);
+        plan.prepare(&input, 0, &mut frame).unwrap();
+        plan.constrain(&mut frame, 0, Some(DVec3::Y)).unwrap();
+        assert!((frame.target_world[2].w_axis.y - 0.12).abs() < 1e-8);
+        assert!(frame.target_rotation[2].dot(input[2].rotation).abs() > 1.0 - 1e-10);
     }
 }
 
@@ -642,6 +720,177 @@ fn pose(bones: &[Bone]) -> Vec<LocalPose> {
     bones.iter().map(|b| b.reference).collect()
 }
 
+#[test]
+fn equipment_rootpos_child_preserves_crouch_motion_and_limb_lengths() {
+    let source = vec![
+        bone("Master", None, DVec3::ZERO),
+        bone("RootPos", Some(0), DVec3::Y),
+        bone("RootRotY", Some(1), DVec3::ZERO),
+        bone("Pelvis", Some(2), DVec3::ZERO),
+        bone("Spine", Some(2), DVec3::Y * 0.2),
+        bone("L_Thigh", Some(3), DVec3::X * 0.1),
+        bone("L_Calf", Some(5), -DVec3::Y * 0.5),
+        bone("L_Foot", Some(6), -DVec3::Y * 0.5),
+    ];
+    let target = vec![
+        bone("Master", None, DVec3::ZERO),
+        bone("RootPos", Some(0), DVec3::Y * 0.8),
+        bone("Pelvis", Some(1), DVec3::Y * 0.4),
+        bone("Spine", Some(2), DVec3::Y * 0.15),
+        bone("L_Thigh", Some(2), DVec3::X * 0.08),
+        bone("L_Calf", Some(4), -DVec3::Y * 0.6),
+        bone("L_Foot", Some(5), -DVec3::Y * 0.6),
+    ];
+    let plan = Plan::new(source.clone(), target.clone(), &[]).unwrap();
+    let mut frame = plan.new_frame();
+    let mut input = pose(&source);
+    for (generation, height) in [1.0, 0.6, 0.1, 0.8, 1.0].into_iter().enumerate() {
+        input[1].translation.y = height;
+        input[0].translation = DVec3::new(4.0, 0.0, -2.0);
+        input[0].rotation = DQuat::from_rotation_y(0.7);
+        input[6].rotation = DQuat::from_rotation_x((1.0 - height) * 0.8);
+        plan.prepare(&input, generation as u64, &mut frame).unwrap();
+        let out = frame.outputs().unwrap();
+        let hip = out.model[2].w_axis.truncate();
+        let expected_height = 1.2 + height - 1.0;
+        assert!(
+            (hip.y - expected_height).abs() < 1e-8,
+            "equipment hip must follow the RootPos child translation; got {}, expected {expected_height}",
+            hip.y
+        );
+        near(out.local[5].translation, target[5].reference.translation);
+        near(out.local[6].translation, target[6].reference.translation);
+        near(
+            out.model[3].w_axis.truncate() - hip,
+            out.model[2].transform_vector3(target[3].reference.translation),
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires private ERCS_RETARGET_LOWER_BODY fixture directory"]
+fn captured_equipment_rootpos_crouch_reaches_mesh_and_physics() {
+    use crate::equipment_retarget_pose as decoder;
+    let directory = std::path::PathBuf::from(std::env::var("ERCS_RETARGET_LOWER_BODY").unwrap());
+    let raw = std::fs::read(directory.join("pose.bin")).unwrap();
+    let word = |bytes: &[u8]| usize::from_le_bytes(bytes.try_into().unwrap());
+    let source_context = word(&raw[..8]);
+    let mut blocks = Vec::new();
+    let mut offset = 24;
+    while offset < raw.len() {
+        let address = word(&raw[offset..offset + 8]);
+        let length = word(&raw[offset + 8..offset + 16]);
+        blocks.push((address, raw[offset + 16..offset + 16 + length].to_vec()));
+        offset += 16 + length;
+    }
+    let read = |address: usize, output: &mut [u8]| {
+        let Some((start, bytes)) = blocks.iter().find(|(start, bytes)| {
+            address >= *start && address - start + output.len() <= bytes.len()
+        }) else {
+            return false;
+        };
+        output.copy_from_slice(&bytes[address - start..address - start + output.len()]);
+        true
+    };
+    let metadata = decoder::pointer(&read, source_context).unwrap();
+    let (identity, source) = decoder::skeleton(&read, metadata).unwrap();
+    let source = animation_reference(source);
+    #[derive(serde::Deserialize)]
+    struct Node {
+        name: String,
+        parent: i16,
+        local_row_major: [f64; 16],
+    }
+    #[derive(serde::Deserialize)]
+    struct Mesh {
+        nodes: Vec<Node>,
+    }
+    let text = std::fs::read_to_string(directory.join("mesh/nodes.toml")).unwrap();
+    let nodes: Mesh = toml::from_str(&text).unwrap();
+    let mesh: Vec<_> = nodes
+        .nodes
+        .into_iter()
+        .map(|node| Bone {
+            name: node.name,
+            parent: (node.parent >= 0).then_some(node.parent as usize),
+            reference: decoder::local(DMat4::from_cols_array(&node.local_row_major)).unwrap(),
+        })
+        .collect();
+    let target = equipment_mesh_reference(&source, &mesh).unwrap();
+    let mut scratch = decoder::PoseScratch::default();
+    scratch
+        .capture(&read, source_context, &identity, &source, 1.0)
+        .unwrap();
+    let pelvis = target
+        .iter()
+        .position(|bone| bone.name == "Pelvis")
+        .unwrap();
+    let root = source
+        .iter()
+        .position(|bone| bone.name == "RootPos")
+        .unwrap();
+    let drop = scratch.local[root].translation.y - source[root].reference.translation.y;
+    assert!(drop < -0.5, "fixture must contain the actual deep crouch");
+    let plan = Plan::new(source.clone(), target.clone(), &[]).unwrap();
+    let mut frame = plan.new_frame();
+    plan.prepare(&pose(&source), 0, &mut frame).unwrap();
+    let standing = frame.outputs().unwrap().model[pelvis].w_axis.y;
+    plan.prepare(&scratch.local, 1, &mut frame).unwrap();
+    let crouching = frame.outputs().unwrap().model[pelvis].w_axis.y;
+    assert!(
+        (crouching - standing - drop).abs() < 1e-4,
+        "live crouch displacement lost: standing={standing}, crouching={crouching}, source_drop={drop}"
+    );
+    for grounded in [false, true] {
+        plan.prepare(&scratch.local, 1, &mut frame).unwrap();
+        plan.constrain(&mut frame, 0, grounded.then_some(DVec3::Y))
+            .unwrap();
+        assert!((frame.outputs().unwrap().model[pelvis].w_axis.y - crouching).abs() < 1e-8);
+        for side in ["L", "R"] {
+            for joint in ["Calf", "Foot"] {
+                let name = format!("{side}_{joint}");
+                let i = target.iter().position(|bone| bone.name == name).unwrap();
+                near(
+                    frame.outputs().unwrap().local[i].translation,
+                    target[i].reference.translation,
+                );
+            }
+        }
+    }
+    let cloth_context = word(&raw[8..16]);
+    let cloth_metadata = decoder::pointer(&read, cloth_context).unwrap();
+    let (_, cloth_bones) = decoder::skeleton(&read, cloth_metadata).unwrap();
+    let physical = equipment_physics_reference(&target, &cloth_bones).unwrap();
+    let map: Vec<_> = physical
+        .iter()
+        .map(|b| target.iter().position(|t| t.name == b.name))
+        .collect();
+    let physics = Plan::new(source.clone(), physical, &[]).unwrap();
+    let mut physical_frame = physics.new_frame();
+    physics
+        .prepare(&scratch.local, 1, &mut physical_frame)
+        .unwrap();
+    physics
+        .align_model(frame.outputs().unwrap().model, &map, &mut physical_frame)
+        .unwrap();
+    for (i, mesh_index) in map
+        .iter()
+        .enumerate()
+        .filter_map(|(i, m)| m.map(|m| (i, m)))
+    {
+        matrix_near(
+            physical_frame.outputs().unwrap().model[i],
+            frame.outputs().unwrap().model[mesh_index],
+        );
+    }
+    println!(
+        "source_bones={} mesh_bones={} source_drop={drop:.6} equipment_drop={:.6}",
+        source.len(),
+        target.len(),
+        crouching - standing
+    );
+}
+
 fn near(a: DVec3, b: DVec3) {
     assert!((a - b).length() < 1e-8, "{a:?} != {b:?}");
 }
@@ -938,8 +1187,8 @@ fn arm_bind_swing_is_calibrated_without_widening_shoulders_or_lengthening_arms()
         target[2].reference.translation *= 0.73;
         let mut plan = Plan::new(source.clone(), target.clone(), &[]).unwrap();
         let bind = plan.inverse_bind.clone();
-        plan.calibrate_arm_directions();
-        plan.calibrate_arm_directions();
+        plan.calibrate_limb_directions();
+        plan.calibrate_limb_directions();
         let mut frame = plan.new_frame();
         for step in 0..60 {
             let mut input = pose(&source);
@@ -1014,7 +1263,7 @@ fn arm_calibration_carries_twist_helpers_without_freezing_their_animation() {
     target[3].reference.translation *= 0.7;
     target[3].reference.rotation = DQuat::from_rotation_x(0.2);
     let mut plan = Plan::new(source.clone(), target, &[]).unwrap();
-    plan.calibrate_arm_directions();
+    plan.calibrate_limb_directions();
     let mut f = plan.new_frame();
     for i in 0..30 {
         let mut input = pose(&source);
@@ -1027,4 +1276,312 @@ fn arm_calibration_carries_twist_helpers_without_freezing_their_animation() {
             "twist helper retained old arm swing"
         );
     }
+}
+
+#[test]
+#[ignore = "requires private ERCS_RETARGET_LOWER_BODY fixture directory"]
+fn captured_sitting_limb_swing_matches_animation() {
+    use crate::equipment_retarget_pose as decoder;
+    let directory = std::path::PathBuf::from(std::env::var("ERCS_RETARGET_LOWER_BODY").unwrap());
+    let raw = std::fs::read(directory.join("pose.bin")).unwrap();
+    let word = |bytes: &[u8]| usize::from_le_bytes(bytes.try_into().unwrap());
+    let source_context = word(&raw[..8]);
+    let mut blocks = Vec::new();
+    let mut offset = 24;
+    while offset < raw.len() {
+        let address = word(&raw[offset..offset + 8]);
+        let length = word(&raw[offset + 8..offset + 16]);
+        blocks.push((address, raw[offset + 16..offset + 16 + length].to_vec()));
+        offset += 16 + length;
+    }
+    let read = |address: usize, output: &mut [u8]| {
+        let Some((start, bytes)) = blocks.iter().find(|(start, bytes)| {
+            address >= *start && address - start + output.len() <= bytes.len()
+        }) else {
+            return false;
+        };
+        output.copy_from_slice(&bytes[address - start..address - start + output.len()]);
+        true
+    };
+    let metadata = decoder::pointer(&read, source_context).unwrap();
+    let (identity, source) = decoder::skeleton(&read, metadata).unwrap();
+    let source = animation_reference(source);
+    #[derive(serde::Deserialize)]
+    struct Node {
+        name: String,
+        parent: i16,
+        local_row_major: [f64; 16],
+    }
+    #[derive(serde::Deserialize)]
+    struct Mesh {
+        nodes: Vec<Node>,
+    }
+    let text = std::fs::read_to_string(directory.join("mesh/nodes.toml")).unwrap();
+    let nodes: Mesh = toml::from_str(&text).unwrap();
+    let mesh: Vec<_> = nodes
+        .nodes
+        .into_iter()
+        .map(|node| Bone {
+            name: node.name,
+            parent: (node.parent >= 0).then_some(node.parent as usize),
+            reference: decoder::local(DMat4::from_cols_array(&node.local_row_major)).unwrap(),
+        })
+        .collect();
+    let target = equipment_mesh_reference(&source, &mesh).unwrap();
+    let mut scratch = decoder::PoseScratch::default();
+    scratch
+        .capture(&read, source_context, &identity, &source, 1.0)
+        .unwrap();
+    let mut plan = Plan::new(source.clone(), target.clone(), &[]).unwrap();
+    plan.calibrate_limb_directions();
+    let mut frame = plan.new_frame();
+    plan.prepare(&scratch.local, 1, &mut frame).unwrap();
+    let mut maximum_angle = 0.0f64;
+    for side in ["L", "R"] {
+        for [a, b] in [["Thigh", "Calf"], ["Calf", "Foot"]] {
+            let index = |bones: &[Bone], part: &str| {
+                bones
+                    .iter()
+                    .position(|x| x.name == format!("{side}_{part}"))
+                    .unwrap()
+            };
+            let sp = &scratch.model;
+            let tp = frame.outputs().unwrap().model;
+            let from = (sp[index(&source, b)].w_axis - sp[index(&source, a)].w_axis)
+                .truncate()
+                .normalize();
+            let to = (tp[index(&target, b)].w_axis - tp[index(&target, a)].w_axis)
+                .truncate()
+                .normalize();
+            let angle = from.dot(to).clamp(-1.0, 1.0).acos().to_degrees();
+            println!("{side}_{a} animation segment deviation={angle:.6}deg");
+            maximum_angle = maximum_angle.max(angle);
+        }
+    }
+    let before = frame.outputs().unwrap().model.to_vec();
+    #[derive(serde::Deserialize)]
+    struct Ground {
+        normal: [f64; 4],
+        orientation: [f64; 4],
+    }
+    let ground: Ground =
+        toml::from_str(&std::fs::read_to_string(directory.join("ground.toml")).unwrap()).unwrap();
+    let normal = DQuat::from_array(ground.orientation).normalize().inverse()
+        * DVec3::new(ground.normal[0], ground.normal[1], ground.normal[2]).normalize();
+    plan.constrain(&mut frame, 0, Some(normal)).unwrap();
+    for side in ["L", "R"] {
+        let i = target
+            .iter()
+            .position(|b| b.name == format!("{side}_Foot"))
+            .unwrap();
+        println!(
+            "{side}_Foot before={:?} after={:?}",
+            before[i].w_axis,
+            frame.outputs().unwrap().model[i].w_axis
+        );
+        let s = source
+            .iter()
+            .position(|b| b.name == target[i].name)
+            .unwrap();
+        let (sw, _) = reference_world(&source, &plan.source_order).unwrap();
+        let (tw, _) = reference_world(&target, &plan.target_order).unwrap();
+        let source_contact = scratch.model[s].w_axis.truncate() - normal * sw[s].w_axis.y;
+        let target_contact =
+            frame.outputs().unwrap().model[i].w_axis.truncate() - normal * tw[i].w_axis.y;
+        assert!(
+            (target_contact - source_contact).dot(normal).abs() < 1e-4,
+            "measured surface/lift mismatch"
+        );
+        assert!(
+            frame.outputs().unwrap().model[i].w_axis.y < 0.25,
+            "seated foot incorrectly lifted"
+        );
+    }
+    assert!(
+        maximum_angle < 0.01,
+        "limb swing differs from animated source: {maximum_angle}deg"
+    );
+}
+
+#[test]
+#[ignore = "requires private ERCS_RETARGET_LOWER_BODY fixture directory"]
+fn captured_retained_weapon_branch_matches_anatomical_grip() {
+    use crate::equipment_retarget_pose as decoder;
+    let directory = std::path::PathBuf::from(std::env::var("ERCS_RETARGET_LOWER_BODY").unwrap());
+    let raw = std::fs::read(directory.join("pose.bin")).unwrap();
+    let word = |bytes: &[u8]| usize::from_le_bytes(bytes.try_into().unwrap());
+    let source_context = word(&raw[..8]);
+    let mut blocks = Vec::new();
+    let mut offset = 24;
+    while offset < raw.len() {
+        let address = word(&raw[offset..offset + 8]);
+        let length = word(&raw[offset + 8..offset + 16]);
+        blocks.push((address, raw[offset + 16..offset + 16 + length].to_vec()));
+        offset += 16 + length;
+    }
+    let read = |address: usize, output: &mut [u8]| {
+        let Some((start, bytes)) = blocks.iter().find(|(start, bytes)| {
+            address >= *start && address - start + output.len() <= bytes.len()
+        }) else {
+            return false;
+        };
+        output.copy_from_slice(&bytes[address - start..address - start + output.len()]);
+        true
+    };
+    let metadata = decoder::pointer(&read, source_context).unwrap();
+    let (identity, source) = decoder::skeleton(&read, metadata).unwrap();
+    let source = animation_reference(source);
+    #[derive(serde::Deserialize)]
+    struct Node {
+        name: String,
+        parent: i16,
+        local_row_major: [f64; 16],
+    }
+    #[derive(serde::Deserialize)]
+    struct Mesh {
+        nodes: Vec<Node>,
+    }
+    let text = std::fs::read_to_string(directory.join("mesh/nodes.toml")).unwrap();
+    let nodes: Mesh = toml::from_str(&text).unwrap();
+    let mesh: Vec<_> = nodes
+        .nodes
+        .into_iter()
+        .map(|node| Bone {
+            name: node.name,
+            parent: (node.parent >= 0).then_some(node.parent as usize),
+            reference: decoder::local(DMat4::from_cols_array(&node.local_row_major)).unwrap(),
+        })
+        .collect();
+    let target = equipment_mesh_reference(&source, &mesh).unwrap();
+    let mut scratch = decoder::PoseScratch::default();
+    scratch
+        .capture(&read, source_context, &identity, &source, 1.0)
+        .unwrap();
+    let mut plan = Plan::new(source.clone(), target.clone(), &[]).unwrap();
+    plan.calibrate_limb_directions();
+    let mut frame = plan.new_frame();
+    plan.prepare(&scratch.local, 1, &mut frame).unwrap();
+    for side in ["L", "R"] {
+        let index = |bones: &[Bone], part: &str| {
+            bones
+                .iter()
+                .position(|x| x.name == format!("{side}_{part}"))
+                .unwrap()
+        };
+        let hand = index(&target, "Hand");
+        let sh = index(&source, "Hand");
+        let weapon = index(&target, "Weapon");
+        let sw = index(&source, "Weapon");
+        let expected = plan.attachment_pose(hand, &frame).unwrap()
+            * frame.source_world[sh].inverse()
+            * frame.source_world[sw];
+        let corrected = plan.attachment_pose(weapon, &frame).unwrap();
+        matrix_near(corrected, expected);
+        let legacy = plan.bone_attachment_pose(weapon, &frame).unwrap();
+        println!(
+            "{side}_Weapon old anatomical offset={} corrected_offset={}",
+            legacy
+                .w_axis
+                .truncate()
+                .distance(expected.w_axis.truncate()),
+            corrected
+                .w_axis
+                .truncate()
+                .distance(expected.w_axis.truncate())
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires private ERCS_RETARGET_LOWER_BODY fixture directory"]
+fn captured_motion_scale_matches_live_limb_proportions() {
+    use crate::equipment_retarget_pose as decoder;
+    let directory = std::path::PathBuf::from(std::env::var("ERCS_RETARGET_LOWER_BODY").unwrap());
+    let raw = std::fs::read(directory.join("pose.bin")).unwrap();
+    let word = |bytes: &[u8]| usize::from_le_bytes(bytes.try_into().unwrap());
+    let source_context = word(&raw[..8]);
+    let mut blocks = Vec::new();
+    let mut offset = 24;
+    while offset < raw.len() {
+        let address = word(&raw[offset..offset + 8]);
+        let length = word(&raw[offset + 8..offset + 16]);
+        blocks.push((address, raw[offset + 16..offset + 16 + length].to_vec()));
+        offset += 16 + length;
+    }
+    let read = |address: usize, output: &mut [u8]| {
+        let Some((start, bytes)) = blocks.iter().find(|(start, bytes)| {
+            address >= *start && address - start + output.len() <= bytes.len()
+        }) else {
+            return false;
+        };
+        output.copy_from_slice(&bytes[address - start..address - start + output.len()]);
+        true
+    };
+    let (identity, source) =
+        decoder::skeleton(&read, decoder::pointer(&read, source_context).unwrap()).unwrap();
+    let source = animation_reference(source);
+    #[derive(serde::Deserialize)]
+    struct Node {
+        name: String,
+        parent: i16,
+        local_row_major: [f64; 16],
+    }
+    #[derive(serde::Deserialize)]
+    struct Mesh {
+        nodes: Vec<Node>,
+    }
+    let nodes: Mesh =
+        toml::from_str(&std::fs::read_to_string(directory.join("mesh/nodes.toml")).unwrap())
+            .unwrap();
+    let mesh: Vec<_> = nodes
+        .nodes
+        .into_iter()
+        .map(|n| Bone {
+            name: n.name,
+            parent: (n.parent >= 0).then_some(n.parent as usize),
+            reference: decoder::local(DMat4::from_cols_array(&n.local_row_major)).unwrap(),
+        })
+        .collect();
+    let target = equipment_mesh_reference(&source, &mesh).unwrap();
+    let mut scratch = decoder::PoseScratch::default();
+    scratch
+        .capture(&read, source_context, &identity, &source, 1.0)
+        .unwrap();
+    let mut plan = Plan::new(source.clone(), target.clone(), &[]).unwrap();
+    plan.calibrate_limb_directions();
+    let mut frame = plan.new_frame();
+    plan.prepare(&scratch.local, 1, &mut frame).unwrap();
+    let length = |bones: &[Bone], world: &[DMat4]| {
+        ["L", "R"]
+            .into_iter()
+            .map(|side| {
+                let ids = ["Thigh", "Calf", "Foot"].map(|part| {
+                    bones
+                        .iter()
+                        .position(|b| b.name == format!("{side}_{part}"))
+                        .unwrap()
+                });
+                world[ids[0]]
+                    .w_axis
+                    .truncate()
+                    .distance(world[ids[1]].w_axis.truncate())
+                    + world[ids[1]]
+                        .w_axis
+                        .truncate()
+                        .distance(world[ids[2]].w_axis.truncate())
+            })
+            .sum::<f64>()
+    };
+    let live_source = length(&source, &scratch.model);
+    let live_target = length(&target, frame.outputs().unwrap().model);
+    let profile = MotionProfile::new(&source, &target).unwrap();
+    let expected = live_target / live_source;
+    println!(
+        "motion ratio={} live ratio={} source legs={} target legs={}",
+        profile.leg_ratio, expected, live_source, live_target
+    );
+    assert!(
+        (profile.leg_ratio / expected - 1.0).abs() < 1e-4,
+        "motion multiplier exceeds actual limb ratio"
+    );
 }

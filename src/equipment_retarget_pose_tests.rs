@@ -1,6 +1,52 @@
 use super::*;
 
 #[test]
+fn terrain_normal_uses_actor_orientation_and_rejects_invalid_physics_data() {
+    let orientation = DQuat::from_rotation_y(0.7);
+    let normal = DVec3::new(0.2, 1.0, -0.1).normalize();
+    for bad in [0, 1, 2, 3] {
+        let mut data = vec![0u8; 0x400];
+        let mut n = normal.as_vec3().to_array().to_vec();
+        n.push(0.0);
+        let mut q = orientation.as_quat().to_array();
+        if bad == 1 {
+            n[0] = f32::NAN;
+        }
+        if bad == 2 {
+            n[..3].fill(0.0);
+        }
+        if bad == 3 {
+            q.fill(0.0);
+        }
+        put(
+            &mut data,
+            0x330,
+            &n.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<_>>(),
+        );
+        put(
+            &mut data,
+            0x150,
+            &q.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<_>>(),
+        );
+        let read = |address: usize, out: &mut [u8]| {
+            let Some(bytes) = data.get(address..address + out.len()) else {
+                return false;
+            };
+            out.copy_from_slice(bytes);
+            true
+        };
+        if bad == 0 {
+            assert!(
+                (ground_normal(&read, 0x100).unwrap() - orientation.inverse() * normal).length()
+                    < 1e-6
+            );
+        } else {
+            assert!(ground_normal(&read, 0x100).is_none());
+        }
+    }
+}
+
+#[test]
 fn solver_cache_preserves_exact_rows_and_defers_shear_descendants() {
     let exact = DMat4::from_translation(DVec3::new(1.0, 2.0, 3.0));
     let (row, flags) = solver_model_cache(exact, false, 0.5).unwrap();

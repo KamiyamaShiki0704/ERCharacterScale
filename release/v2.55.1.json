@@ -1,0 +1,18 @@
+{
+  "version": "2.55.1",
+  "artifact": "ERCharacterScale.dll",
+  "platform": "windows-x86_64",
+  "configuration": "ERCharacterScale.toml",
+  "license": "MIT",
+  "features": [
+    "Configurable player and character scaling",
+    "Automatic equipment skeleton retargeting",
+    "Cross-character animation retargeting",
+    "Cloth, limb IK, weapon and attachment adaptation"
+  ],
+  "updates": [
+    "Improve seated poses and leg animation adaptation",
+    "Improve weapon, item and body attachment alignment",
+    "Correct arm lifting with independent-hand weapon movesets"
+  ]
+}

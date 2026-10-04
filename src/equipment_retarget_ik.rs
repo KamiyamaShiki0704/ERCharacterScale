@@ -7,7 +7,6 @@ use super::*;
 struct Limb {
     joints: [usize; 3],
     source_end: usize,
-    source_reference_rotation: DQuat,
     source_height: f64,
     target_height: f64,
 }
@@ -36,10 +35,6 @@ impl Constraints {
             Some(Limb {
                 joints,
                 source_end,
-                source_reference_rotation: sw[source_end]
-                    .to_scale_rotation_translation()
-                    .1
-                    .normalize(),
                 source_height: sw[source_end].w_axis.y,
                 target_height: tw[joints[2]].w_axis.y,
             })
@@ -55,7 +50,7 @@ impl Constraints {
         plan: &Plan,
         frame: &mut Frame,
         style: u32,
-        grounded: bool,
+        ground_normal: Option<DVec3>,
     ) -> Result<(), Error> {
         if !frame.ready {
             return Err(Error::InvalidPose);
@@ -88,19 +83,17 @@ impl Constraints {
             let rotation = (delta * frame.target_rotation[other.joints[2]]).normalize();
             solve(plan, frame, other, goal, rotation)?;
         }
-        if grounded {
+        if let Some(normal) = ground_normal.and_then(DVec3::try_normalize)
+            && normal.is_finite()
+            && normal.y > 0.3
+        {
             for limb in self.legs.into_iter().flatten() {
                 let source = frame.source_world[limb.source_end];
-                let rotation = (frame.source_rotation[limb.source_end]
-                    * limb.source_reference_rotation.inverse())
-                .normalize();
-                let normal = rotation * DVec3::Y;
-                // Native ankle orientation supplies the local contact plane.
+                // A seated or lifted ankle can rotate independently of the
+                // terrain. Use the measured surface normal in model space;
+                // ankle rotation is never evidence of a sloped contact plane.
                 // Preserve foot lift from animation; only replace the authored
                 // ankle-to-ground offset and sample at the new foot position.
-                if normal.y <= 0.3 {
-                    continue;
-                }
                 let mut goal = frame.target_world[limb.joints[2]].w_axis.truncate();
                 let contact = source.w_axis.truncate() - normal * limb.source_height;
                 let target_offset = normal * limb.target_height;

@@ -15,6 +15,30 @@ pub(crate) fn pointer(read: &Reader<'_>, address: usize) -> Option<usize> {
     Some(usize::from_le_bytes(bytes(read, address)?))
 }
 
+/// Measured terrain normal, converted from world to actor/model space.
+/// Physics material normal +0x230 and actor orientation +0x50 are from the
+/// pinned CSChrPhysicsModule layout; invalid input disables this constraint.
+pub(crate) fn ground_normal(read: &Reader<'_>, physics: usize) -> Option<DVec3> {
+    let vector = |address| -> Option<[f64; 4]> {
+        let raw = bytes::<16>(read, address)?;
+        Some(std::array::from_fn(|i| {
+            f32::from_le_bytes(raw[i * 4..i * 4 + 4].try_into().unwrap()) as f64
+        }))
+    };
+    let n = vector(physics.checked_add(0x230)?)?;
+    let q = vector(physics.checked_add(0x50)?)?;
+    let rotation = DQuat::from_array(q);
+    let normal = DVec3::new(n[0], n[1], n[2]);
+    if !normal.is_finite()
+        || !rotation.is_finite()
+        || (rotation.length_squared() - 1.0).abs() > 0.005
+        || (normal.length_squared() - 1.0).abs() > 0.05
+    {
+        return None;
+    }
+    (rotation.normalize().inverse() * normal).try_normalize()
+}
+
 fn i32_at(raw: &[u8], offset: usize) -> i32 {
     i32::from_le_bytes(raw[offset..offset + 4].try_into().unwrap())
 }

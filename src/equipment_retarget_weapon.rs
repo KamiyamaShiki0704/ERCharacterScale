@@ -79,11 +79,20 @@ impl GripCache {
             }
             self.row = find_row(read, file, size, end, count, id);
         }
-        let flag = pose::bytes::<1>(read, file.checked_add(self.row?)?.checked_add(0x17c)?)?[0];
+        let row = file.checked_add(self.row?)?;
+        let flag = pose::bytes::<1>(read, row.checked_add(0x17c)?)?[0];
+        let motions = pose::bytes::<2>(read, row.checked_add(0xf0)?)?;
         // isDualBlade is bit 1 of EquipParamWeapon +17C. Read the actual flag
         // each frame; only the row lookup is cached. Swaps/table replacement
         // invalidate the key, including left versus right selected slots.
-        Some(if flag & 2 == 0 { style } else { 0 })
+        // Some custom weapons retain independent hands in a two-hand style:
+        // their one- and two-hand basic motion IDs are identical, without the
+        // isDualBlade bit. Such a style is not evidence of a shared rigid grip.
+        Some(if flag & 2 == 0 && motions[0] != motions[1] {
+            style
+        } else {
+            0
+        })
     }
 }
 

@@ -396,17 +396,19 @@ impl Session {
             let style = work
                 .grip
                 .style(&read, self.key.player, BASE.load(Ordering::Acquire));
-            let grounded = (|| -> Option<bool> {
+            let ground_normal = (|| -> Option<glam::DVec3> {
                 let modules = ptr(self.key.player + 0x190)?;
                 let behavior = ptr(modules + 0x28)?;
                 let physics = ptr(modules + 0x68)?;
                 let contact = pose::bytes::<2>(&read, physics + 0x1D0)?;
                 let state = i32::from_le_bytes(pose::bytes(&read, behavior + 0x1680)?);
-                Some(contact == [0, 1] && state != -1)
-            })()
-            .unwrap_or(false);
+                if contact != [0, 1] || state == -1 || ptr(physics + 8) != Some(self.key.player) {
+                    return None;
+                }
+                pose::ground_normal(&read, physics)
+            })();
             self.mesh_plan
-                .constrain(&mut work.mesh, style, grounded)
+                .constrain(&mut work.mesh, style, ground_normal)
                 .ok()?;
         }
         if let (Some(plan), Some(frame)) = (&self.cloth_plan, &mut work.cloth) {
@@ -544,7 +546,7 @@ fn bind(key: Key, identity: Identity, generation: u64, scale: f64, force: bool) 
     let mut mesh_plan = Plan::new(source_bones.clone(), mesh_bones.clone(), &[]).ok()?;
     let motion = MotionProfile::new(&source_bones, &mesh_bones);
     if motion.is_some() {
-        mesh_plan.calibrate_arm_directions();
+        mesh_plan.calibrate_limb_directions();
     }
     let (cloth_identity, cloth_bones, cloth_plan) = if key.owner != 0 {
         let (id, bones) = pose::skeleton(&read, key.input_meta)?;

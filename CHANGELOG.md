@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.55.1
+
+- Improve seated poses, leg animation adaptation and ground contact with equipment of different proportions.
+- Improve weapon, item and body attachment alignment.
+- Correct arm lifting when a two-hand weapon style uses an independent-hand moveset.
+
 ## 2.55.0 — equipment and animation retargeting
 
 - Automatically detect player equipment with different authored body proportions and preserve its bone lengths and skin binding. Integrate matching physics assets, camera height, motion, slope/foot correction, grips, weapons and body attachment points.

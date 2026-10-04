@@ -269,6 +269,52 @@ pub struct Bone {
     pub reference: LocalPose,
 }
 
+/// Resolve a native dummy/prop branch through its real parent chain. Native
+/// model helpers need not exist in the animation SK or the clothing mesh.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AttachmentAnchor {
+    pub source: usize,
+    pub target: usize,
+    pub native: usize,
+    pub weapon: bool,
+}
+
+pub(crate) fn attachment_anchor(
+    source: &[Bone],
+    target: &[Bone],
+    names: &[String],
+    parents: &[Option<usize>],
+    index: usize,
+) -> Option<AttachmentAnchor> {
+    if names.len() != parents.len() {
+        return None;
+    }
+    let mut current = index;
+    let mut weapon = false;
+    for _ in 0..names.len() {
+        let name = names.get(current)?;
+        weapon |= matches!(name.as_str(), "L_Weapon" | "R_Weapon");
+        if let Some(mut s) = source.iter().position(|b| b.name == *name) {
+            for _ in 0..source.len() {
+                weapon |= matches!(source[s].name.as_str(), "L_Weapon" | "R_Weapon");
+                if let Some(t) = target.iter().position(|b| b.name == source[s].name) {
+                    let native = names.iter().position(|n| *n == source[s].name)?;
+                    return Some(AttachmentAnchor {
+                        source: s,
+                        target: t,
+                        native,
+                        weapon,
+                    });
+                }
+                s = source[s].parent?;
+            }
+            return None;
+        }
+        current = parents.get(current).copied().flatten()?;
+    }
+    None
+}
+
 /// Reference: keep authored offsets; Animated: transfer translation deltas;
 /// Scaled: also scale deltas by this joint's reference-offset length ratio.
 /// Root motion uses Animated with a ratio of one, independently of leg length.
@@ -302,6 +348,7 @@ pub enum Error {
 #[derive(Clone, Copy)]
 struct Mapping {
     source: usize,
+    weapon_hand: Option<(usize, usize)>,
     translation: TranslationMode,
     translation_ratio: f64,
     parent_alignment: DQuat,
@@ -557,15 +604,20 @@ impl Plan {
 
     /// Align limb swing to the animation reference, keeping authored lengths,
     /// shoulder positions, skin binding and twist. Run once at binding.
-    pub(crate) fn calibrate_arm_directions(&mut self) {
+    pub(crate) fn calibrate_limb_directions(&mut self) {
         let Ok((sw, sr)) = reference_world(&self.source, &self.source_order) else {
             return;
         };
         let Ok((tw, tr)) = reference_world(&self.target, &self.target_order) else {
             return;
         };
-        for side in ["L", "R"] {
-            let joints = ["UpperArm", "Forearm", "Hand"].map(|part| {
+        for (side, parts) in [
+            ("L", ["UpperArm", "Forearm", "Hand"]),
+            ("R", ["UpperArm", "Forearm", "Hand"]),
+            ("L", ["Thigh", "Calf", "Foot"]),
+            ("R", ["Thigh", "Calf", "Foot"]),
+        ] {
+            let joints = parts.map(|part| {
                 self.target
                     .iter()
                     .position(|b| b.name == format!("{side}_{part}"))
@@ -646,9 +698,11 @@ impl Plan {
         &self,
         frame: &mut Frame,
         arm_style: u32,
-        grounded: bool,
+        ground_normal: Option<DVec3>,
     ) -> Result<(), Error> {
-        let result = self.constraints.apply(self, frame, arm_style, grounded);
+        let result = self
+            .constraints
+            .apply(self, frame, arm_style, ground_normal);
         if result.is_err() {
             frame.ready = false;
         }
@@ -674,6 +728,17 @@ impl Plan {
     }
 
     pub(crate) fn attachment_pose(&self, index: usize, frame: &Frame) -> Option<DMat4> {
+        let mapping = self.mapping.get(index)?.as_ref()?;
+        if let Some((source_hand, target_hand)) = mapping.weapon_hand {
+            // A retained weapon/helper bone is not the anatomical grip.
+            // Transfer its live motion relative to the calibrated hand, just
+            // as when the clothing mesh omits the weapon branch entirely.
+            return Some(
+                self.attachment_pose(target_hand, frame)?
+                    * frame.source_world.get(source_hand)?.inverse()
+                    * *frame.source_world.get(mapping.source)?,
+            );
+        }
         let mut result = self.bone_attachment_pose(index, frame)?;
         let mapping = self.mapping.get(index)?.as_ref()?;
         if let Some(offset) = self
@@ -809,7 +874,12 @@ impl Plan {
             let source_name = rule.map_or(bone.name.as_str(), |rule| rule.source.as_str());
             let mapped = source_names.get(source_name).map(|&s| {
                 let mode = rule.map_or(
-                    if bone.parent.is_none() {
+                    // Body displacement controls remain animated when a
+                    // FLVER retains them below Master. Keeping their bind
+                    // translation freezes crouch/lean while joint rotations
+                    // and foot constraints continue to run. Limb offsets
+                    // still keep their authored reference lengths.
+                    if bone.parent.is_none() || matches!(bone.name.as_str(), "Root" | "RootPos") {
                         TranslationMode::Animated
                     } else {
                         TranslationMode::Reference
@@ -841,6 +911,20 @@ impl Plan {
                 });
                 Mapping {
                     source: s,
+                    weapon_hand: {
+                        let mut ancestor = Some(s);
+                        let mut weapon = false;
+                        let mut hand = None;
+                        while let Some(a) = ancestor {
+                            weapon |= matches!(source[a].name.as_str(), "L_Weapon" | "R_Weapon");
+                            if weapon && matches!(source[a].name.as_str(), "L_Hand" | "R_Hand") {
+                                hand = target_names.get(source[a].name.as_str()).map(|&t| (a, t));
+                                break;
+                            }
+                            ancestor = source[a].parent;
+                        }
+                        hand
+                    },
                     translation: mode,
                     translation_ratio: ratio,
                     parent_alignment: target_parent.inverse() * source_parent,

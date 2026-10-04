@@ -4,7 +4,7 @@
 
 Configure the overall size of the Elden Ring player and other characters through TOML rules. Apply a scale while a SpEffect is active, or use a constant scale without any effect requirement.
 
-[Download v2.55.0](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.0) · [Configuration guide (Chinese)](docs/CONFIGURATION.md) · [Changelog](CHANGELOG.md)
+[Download v2.55.1](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.1) · [Configuration guide (Chinese)](docs/CONFIGURATION.md) · [Changelog](CHANGELOG.md)
 
 ## Features
 
@@ -16,15 +16,18 @@ Configure the overall size of the Elden Ring player and other characters through
 - Automatically detect different player-equipment proportions, animate at authored bone lengths, and adapt physics, camera follow, motion, limb IK, weapons and body attachment points.
 - Retarget other characters' animations onto the player by matching bone names, preserving target proportions and adapting root motion and weapon-bone motion.
 
+## Latest changes
+
+Improve seated poses and leg animation adaptation, align weapon and item attachment points, and correct arm lifting with independent-hand weapon movesets.
+
 ## Installation
 
 For **Windows x64, offline Elden Ring WW2.7.1.0 / game1.17.1**. Other executable versions require separate validation.
 
-1. Download `ERCharacterScale-v2.55.0-windows-x64.zip` from the [Release page](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.0).
+1. Download `ERCharacterScale-v2.55.1-windows-x64.zip` from the [Release page](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.1).
 2. Place `ERCharacterScale.dll` and `ERCharacterScale.toml` in the same directory, and load the DLL with your existing DLL loader.
 3. Edit the TOML configuration as needed, then start the game. Restart the game after later configuration-file changes.
 
-When upgrading, exit the game before replacing the DLL and keep your existing `ERCharacterScale.toml`. The bundled TOML is the default configuration: player effect rules are enabled, and **non-player scaling is disabled by default**.
 
 The released DLL includes its C/C++ runtime. No separate Visual C++ Redistributable or Rust installation is required. Windows system components are supplied by the operating system.
 
@@ -63,7 +66,7 @@ cd ERCharacterScale
 cargo build --release --locked
 ```
 
-The output is `target/x86_64-pc-windows-msvc/release/ERCharacterScale.dll`. The repository configures static C/C++ runtime linking. Cargo fetches `fromsoftware-rs` from Git at the pinned commit `02fa5681e27fd2ecd9da79d34aef9fae96805539`. This repository contains neither its source tree nor a Git submodule. `Cargo.lock` pins dependency resolution.
+The output is `target/x86_64-pc-windows-msvc/release/ERCharacterScale.dll`. The repository configures static C/C++ runtime linking. Cargo fetches `fromsoftware-rs` from Git at a pinned commit. This repository contains neither its source tree nor a Git submodule. `Cargo.lock` pins dependency resolution.
 
 See [Validation](docs/VALIDATION.md) for development checks and test commands.
 
