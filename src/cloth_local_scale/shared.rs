@@ -9,6 +9,10 @@ use std::{cell::RefCell, collections::HashSet, sync::Arc};
 #[path = "../test_support/convex_replay.rs"]
 mod convex_replay;
 
+#[cfg(test)]
+#[path = "../test_support/bd1220_replay.rs"]
+mod bd1220_replay;
+
 #[derive(Clone, Copy)]
 pub(crate) struct Consumer {
     pub identity: Identity,
@@ -453,6 +457,57 @@ mod tests {
         sim[0x48 / 8] = 1;
         sim[0xA8 / 8] = u32::MAX as usize;
         sim
+    }
+
+    #[test]
+    fn native_collidable_without_transform_map_keeps_one_cached_baseline() {
+        let _environment = Environment::new();
+        let mut particle = [0.0f32, 0.0, 2.0, 0.0];
+        let mut shape = vec![0usize; 0x30 / 8];
+        shape[0] = BASE + ER_HCL_SPHERE_SHAPE_VTABLE_RVA;
+        unsafe {
+            ((shape.as_mut_ptr() as *mut u8).add(0x2c) as *mut f32).write(2.0);
+        }
+        let mut collider = [0usize; 0xa0 / 8];
+        collider[0] = BASE + ER_HCL_COLLIDABLE_VTABLE_RVA;
+        collider[0x88 / 8] = shape.as_ptr() as usize;
+        let colliders = [collider.as_ptr() as usize];
+        let mut sim = simulation(particle.as_mut_ptr() as usize);
+        sim[0xd0 / 8] = colliders.as_ptr() as usize;
+        sim[0xd8 / 8] = 1;
+        let actor = Character::new(1220, 1, 1.0);
+        actor.attach_cloth(sim.as_ptr() as usize);
+        let mut pool = Pool::default();
+        let consumer = |scale| Consumer {
+            identity: actor.identity(),
+            scale,
+        };
+        let initial = pool.prepare(&[consumer(1.0)]);
+        assert!(initial.rejected.is_empty());
+        assert_eq!(pool.resources.len(), 3);
+        let mut baseline =
+            with_prepared(&initial, || capture(sim.as_ptr() as usize, || None)).unwrap();
+        let builds = SPAN_BUILDS.with(std::cell::Cell::get);
+        for _ in 0..360 {
+            let prepared = pool.prepare(&[consumer(1.0)]);
+            assert!(prepared.rejected.is_empty());
+        }
+        assert_eq!(
+            SPAN_BUILDS.with(std::cell::Cell::get),
+            builds,
+            "stable mapless collidable recaptured"
+        );
+        baseline.apply(0.5).unwrap();
+        assert_eq!(particle[2], 1.0);
+        baseline.apply(1.0).unwrap();
+        assert_eq!(particle[2], 2.0);
+        sim[0xb8 / 8] = 1;
+        assert!(
+            !baseline.identity_matches(),
+            "map population must invalidate old capture"
+        );
+        let prepared = pool.prepare(&[consumer(0.5)]);
+        assert!(prepared.rejected.contains_key(&actor.address));
     }
 
     #[test]

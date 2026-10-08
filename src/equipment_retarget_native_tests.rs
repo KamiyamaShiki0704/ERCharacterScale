@@ -92,6 +92,26 @@ struct Heap {
 }
 
 #[test]
+fn repeated_session_validation_reuses_permissions_but_reads_identity_fresh() {
+    let fixture = NativeTest::new();
+    refresh(fixture.character.address, 1.0, 1);
+    let session = REGISTRY.read().unwrap()[0].clone();
+    crate::memory_query::scoped(|| {
+        assert!(session.current());
+        let before = crate::memory_query::query_count();
+        assert!(session.current());
+        let repeated = crate::memory_query::query_count() - before;
+        assert_eq!(
+            repeated, 0,
+            "nested identity validation discarded the current operation's permissions"
+        );
+        // Fresh data is still required even with permissions already checked.
+        fixture._heap.put(fixture.slot, 0usize);
+        assert!(!session.current());
+    });
+}
+
+#[test]
 fn equipment_without_cloth_retargets_through_first_mapper() {
     let fixture = NativeTest::new();
     let equipment = ptr(fixture.slot).unwrap();
@@ -1032,10 +1052,10 @@ fn body_dummy_batches_follow_local_body_without_weapons_and_revoke_stale_records
     let modifier = h.alloc(0x80);
     let animation = h.alloc(0x80);
     let skeleton = h.alloc(0x20);
-    let bones = h.alloc(3 * 64);
-    let worlds = h.alloc(3 * 48);
+    let bones = h.alloc(4 * 64);
+    let worlds = h.alloc(4 * 48);
     let table = h.alloc(0x20);
-    let records = h.alloc(3 * 80);
+    let records = h.alloc(4 * 80);
     let wrapper = h.alloc(0x10);
     unsafe {
         (fixture.character.address as *mut u8)
@@ -1048,15 +1068,15 @@ fn body_dummy_batches_follow_local_body_without_weapons_and_revoke_stale_records
     h.put(item + 0x650, provider);
     h.put(provider, TEST_BASE + 0x2B70598);
     h.put(provider + 0x68, table);
-    h.put(table, 3i32);
+    h.put(table, 4i32);
     h.put(table + 8, records);
     h.put(array, TEST_BASE + 0x2B6EB88);
-    h.put(array + 0x68, 3i32);
+    h.put(array + 0x68, 4i32);
     h.put(array + 0x70, worlds);
     h.put(modifier, TEST_BASE + 0x2B708D0);
     h.put(animation, TEST_BASE + 0x2B6F2C8);
     h.put(animation + 0x68, skeleton);
-    h.put(skeleton, 3u16);
+    h.put(skeleton, 4u16);
     h.put(skeleton + 8, bones);
     h.put(wrapper, TEST_BASE + 0x2B753E0);
     h.put(wrapper + 8, array);
@@ -1069,12 +1089,21 @@ fn body_dummy_batches_follow_local_body_without_weapons_and_revoke_stale_records
         h.put(holder, value);
         h.put(at, holder);
     }
-    for (i, name) in ["L_UpperArm", "L_Forearm", "L_Hand"].iter().enumerate() {
+    for (i, name) in [
+        "L_UpperArm",
+        "L_Forearm",
+        "L_Hand",
+        "IndependentNativePoint",
+    ]
+    .iter()
+    .enumerate()
+    {
         let text = h.text(name, true);
         h.put(bones + i * 64 + 0x20, text);
         h.put(
             worlds + i * 48,
-            pose::affine_output(DMat4::from_translation(DVec3::X * [0.0, 2.0, 3.0][i])).unwrap(),
+            pose::affine_output(DMat4::from_translation(DVec3::X * [0.0, 2.0, 3.0, 99.0][i]))
+                .unwrap(),
         );
         h.put(
             records + i * 80,
@@ -1085,6 +1114,7 @@ fn body_dummy_batches_follow_local_body_without_weapons_and_revoke_stale_records
             DMat4::IDENTITY.to_cols_array().map(|v| v as f32),
         );
     }
+    h.put(bones + 3 * 64 + 0x2c, -1i16);
     refresh(fixture.character.address, 1.0, 1);
     Arc::get_mut(&mut REGISTRY.write().unwrap()[0])
         .unwrap()
@@ -1095,7 +1125,7 @@ fn body_dummy_batches_follow_local_body_without_weapons_and_revoke_stale_records
     dummies::refresh(&REGISTRY.read().unwrap(), TEST_BASE);
     unsafe extern "C" fn original(_: usize, out: usize, record: usize) -> usize {
         let index = unsafe { ((record + 4) as *const i32).read_unaligned() } as usize;
-        let m = DMat4::from_translation(DVec3::X * [0.0, 2.0, 3.0][index])
+        let m = DMat4::from_translation(DVec3::X * [0.0, 2.0, 3.0, 99.0][index])
             .to_cols_array()
             .map(|v| v as f32);
         unsafe {
@@ -1107,6 +1137,17 @@ fn body_dummy_batches_follow_local_body_without_weapons_and_revoke_stale_records
     let mut r: Registers = unsafe { std::mem::zeroed() };
     r.rcx = wrapper as u64;
     r.rdx = out.as_mut_ptr() as u64;
+    let native_queries = crate::memory_query::query_count();
+    r.r8 = (records + 3 * 80) as u64;
+    for _ in 0..120 {
+        dummies::hook(&mut r, original as *const () as usize);
+        assert_eq!(out[12], 99.0, "independent native point must stay native");
+    }
+    let extra_queries = crate::memory_query::query_count() - native_queries;
+    assert_eq!(
+        extra_queries, 0,
+        "unmapped dummy repeatedly validates unrelated pose storage"
+    );
     for _ in 0..20 {
         for (i, x) in [0.0, 0.7, 1.1].into_iter().enumerate() {
             r.r8 = (records + i * 80) as u64;

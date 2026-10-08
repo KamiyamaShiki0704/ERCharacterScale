@@ -1,0 +1,17 @@
+{
+  "version": "2.55.3",
+  "artifact": "ERCharacterScale.dll",
+  "platform": "windows-x86_64",
+  "configuration": "ERCharacterScale.toml",
+  "license": "MIT",
+  "features": [
+    "Configurable player and character scaling",
+    "Automatic equipment skeleton retargeting with optional cloth physics",
+    "Cross-character animation retargeting",
+    "Cloth, limb IK, weapon and attachment adaptation"
+  ],
+  "updates": [
+    "Fix repeated cloth resource processing on native equipment such as the Twinned Armor",
+    "Reduce redundant equipment and attachment validation"
+  ]
+}

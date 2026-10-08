@@ -366,7 +366,9 @@ struct Work {
 impl Session {
     fn current(&self) -> bool {
         self.active.load(Ordering::Acquire)
-            && self.identity.current()
+            // The caller owns this synchronous memory-query scope. Read the
+            // identity fresh without discarding its already checked pages.
+            && Identity::capture(self.identity.address) == Some(self.identity)
             && self.key.current(BASE.load(Ordering::Acquire))
             && self.source_identity.current(&read)
             && pose::bytes::<4>(&read, self.key.resource + 0x1C)
@@ -876,12 +878,15 @@ impl Drop for SolverInput {
 
 impl SolverInput {
     pub fn completed(&self) {
-        if self.session.current()
-            && let Ok(mut work) = self.session.work.lock()
-            && work.generation == self.generation
-        {
-            work.solver_completed = Some(self.generation);
-        }
+        // Native simulation has returned; start a fresh permission scope.
+        crate::memory_query::scoped(|| {
+            if self.session.current()
+                && let Ok(mut work) = self.session.work.lock()
+                && work.generation == self.generation
+            {
+                work.solver_completed = Some(self.generation);
+            }
+        });
     }
     pub fn context(&mut self) -> usize {
         let storage = self.storage.as_mut().unwrap();

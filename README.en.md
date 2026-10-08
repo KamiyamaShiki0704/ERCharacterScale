@@ -4,7 +4,7 @@
 
 Configure the overall size of the Elden Ring player and other characters through TOML rules. Apply a scale while a SpEffect is active, or use a constant scale without any effect requirement.
 
-[Download v2.55.2](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.2) · [Configuration guide (Chinese)](docs/CONFIGURATION.md) · [Changelog](CHANGELOG.md)
+[Download v2.55.3](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.3) · [Configuration guide (Chinese)](docs/CONFIGURATION.md) · [Changelog](CHANGELOG.md)
 
 ## Features
 
@@ -18,13 +18,13 @@ Configure the overall size of the Elden Ring player and other characters through
 
 ## Latest changes
 
-Fix proportion retargeting for equipment without cloth physics. Parts with no bones retain native rendering without repeated binding attempts.
+Fix frame drops caused by repeated cloth resource processing on native equipment such as the Twinned Armor, and reduce redundant validation in equipment retargeting and body attachment queries.
 
 ## Installation
 
 For **Windows x64, offline Elden Ring WW2.7.1.0 / game1.17.1**. Other executable versions require separate validation.
 
-1. Download `ERCharacterScale-v2.55.2-windows-x64.zip` from the [Release page](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.2).
+1. Download `ERCharacterScale-v2.55.3-windows-x64.zip` from the [Release page](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.3).
 2. Place `ERCharacterScale.dll` and `ERCharacterScale.toml` in the same directory, and load the DLL with your existing DLL loader.
 3. Edit the TOML configuration as needed, then start the game. Restart the game after later configuration-file changes.
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.55.3
+
+- Fix repeated cloth resource processing on native equipment such as the Twinned Armor.
+- Reduce redundant validation in equipment retargeting and body attachment queries.
+
 ## 2.55.2
 
 - Support equipment proportion retargeting without cloth physics assets.

@@ -1009,18 +1009,19 @@ fn capture_collidable_transform_map_dimensions(
         baseline.capture_array(sim_data, 0xB0, 0xB8, size_of::<u32>(), MAX_COLLIDABLES)?;
     let (offsets, offset_count) =
         baseline.capture_array(sim_data, 0xC0, 0xC8, 0x40, MAX_COLLIDABLES)?;
+    // Native BD1220 has a collidable but no bone-transform map. These are
+    // independent arrays: -1 with both map arrays empty means no mapping,
+    // regardless of the collidable list. Capture empty arrays for invalidation;
+    // collidable transforms/shapes remain validated by their own baselines.
+    if transform_set_index == -1 && transform_index_count == 0 && offset_count == 0 {
+        return Some(0);
+    }
     if transform_index_count != expected_collidable_count
         || offset_count != expected_collidable_count
     {
         return None;
     }
-    // Live BD_M_1690 uses -1 for an absent map. Its particle/pose/constraint
-    // dimensions still need scaling. Only admit this exact empty topology;
-    // capture the empty arrays above so later population invalidates it.
-    let absent_map = transform_set_index == -1 && expected_collidable_count == 0;
-    if !absent_map
-        && (transform_set_index < 0 || transform_set_index as usize > MAX_CONSTRAINT_SETS)
-    {
+    if transform_set_index < 0 || transform_set_index as usize > MAX_CONSTRAINT_SETS {
         return None;
     }
 
@@ -1563,7 +1564,7 @@ mod tests {
         for (index, expected_count, indices, offsets) in [
             (-2i32, 0, 0, 0),
             (257, 0, 0, 0),
-            (-1, 1, 0, 0),
+            (-1, 1, 1, 1),
             (-1, 0, 1, 0),
             (-1, 0, 0, 1),
             (0, 1, 0, 0),

@@ -228,6 +228,9 @@ fn query_hook(registers: *mut Registers, original: usize, affine: bool) -> usize
     ERCS_DUMMY_QUERY_COUNTS[counter].fetch_add(1, Ordering::Relaxed);
     let stride = if affine { 48 } else { 64 };
     let _ = crate::memory_query::scoped(|| -> Option<()> {
+        // Unmapped entries keep the native result. Consult the immutable route
+        // first; only mapped records need fresh ownership/pose validation.
+        let record = route.record(r.r8 as usize)?;
         let base = BASE.load(Ordering::Acquire);
         if ptr(wrapper) != Some(base + 0x2B753E0) || ptr(wrapper + 8) != Some(array) {
             return None;
@@ -235,7 +238,6 @@ fn query_hook(registers: *mut Registers, original: usize, affine: bool) -> usize
         if !route.current() || !route.session.current() {
             return None;
         }
-        let record = route.record(r.r8 as usize)?;
         let address = r.rdx as usize;
         if !crate::memory_query::accessible_span(address, stride, true)
             || !render_output_is_private(&route.session.key, address, stride)
