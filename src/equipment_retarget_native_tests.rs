@@ -90,6 +90,124 @@ struct Heap {
     data: Vec<u128>,
     cursor: usize,
 }
+
+#[test]
+fn equipment_without_cloth_retargets_through_first_mapper() {
+    let fixture = NativeTest::new();
+    let equipment = ptr(fixture.slot).unwrap();
+    let item = ptr(equipment + 0x10).unwrap();
+    let exporter = ptr(item + 0x658).unwrap();
+    let holder = ptr(exporter + 0x70).unwrap();
+    let owner = ptr(equipment + 0x130).unwrap();
+    fixture._heap.put(exporter + 0x70, 0usize);
+    fixture._heap.put(equipment + 0x130, 0usize);
+    refresh(fixture.character.address, 1.0, 1);
+    assert_eq!(
+        REGISTRY.read().unwrap().len(),
+        1,
+        "equipment without cloth must bind"
+    );
+    let out = fixture.draw();
+    assert!((out[2][3] - 1.1).abs() < 1e-5);
+    assert!(REGISTRY.read().unwrap()[0].cloth_plan.is_none());
+    assert!(solver_input(fixture.inner, fixture.input + 0x48, fixture.transform).is_none());
+    fixture._heap.put(exporter + 0x70, holder);
+    assert!(!REGISTRY.read().unwrap()[0].key.current(TEST_BASE));
+    refresh(fixture.character.address, 1.0, 2);
+    assert_eq!(REGISTRY.read().unwrap().len(), 1);
+    assert!((fixture.draw()[2][3] - 1.1).abs() < 1e-5);
+    // A cloth owner appearing later must revoke the mesh-only session and
+    // restore the ordinary requirement that physics consumes the target pose.
+    fixture._heap.put(equipment + 0x130, owner);
+    assert!(!REGISTRY.read().unwrap()[0].key.current(TEST_BASE));
+    refresh(fixture.character.address, 1.0, 3);
+    assert_eq!(fixture.draw(), [[99.0; 12]; 4]);
+    let mut input = solver_input(fixture.inner, fixture.input + 0x48, fixture.transform).unwrap();
+    input.context();
+    input.completed();
+    assert!((fixture.draw()[2][3] - 1.1).abs() < 1e-5);
+}
+
+#[test]
+fn empty_mapper_lists_and_unreadable_nonempty_lists_cannot_bind() {
+    let fixture = NativeTest::new();
+    let equipment = ptr(fixture.slot).unwrap();
+    let exporter = ptr(ptr(equipment + 0x10).unwrap() + 0x658).unwrap();
+    let first = ptr(exporter + 0x50).unwrap();
+    fixture._heap.put(equipment + 0x130, 0usize);
+    fixture._heap.put(exporter + 0x50, 0usize);
+    fixture._heap.put(exporter + 0x70, 0usize);
+    refresh(fixture.character.address, 1.0, 1);
+    assert!(REGISTRY.read().unwrap().is_empty());
+    fixture._heap.put(exporter + 0x50, first);
+    fixture._heap.put(exporter + 0x70, 1usize);
+    refresh(fixture.character.address, 1.0, 2);
+    assert!(
+        REGISTRY.read().unwrap().is_empty(),
+        "unreadable list is not an absent list"
+    );
+    fixture._heap.put(exporter + 0x70, 0usize);
+    refresh(fixture.character.address, 1.0, 3);
+    assert_eq!(REGISTRY.read().unwrap().len(), 1);
+}
+
+#[test]
+fn invalid_mesh_counts_do_not_get_cached_as_boneless_models() {
+    let fixture = NativeTest::new();
+    let equipment = ptr(fixture.slot).unwrap();
+    let item = ptr(equipment + 0x10).unwrap();
+    let exporter = ptr(item + 0x658).unwrap();
+    let resource = ptr(item + 0x68).unwrap();
+    fixture._heap.put(exporter + 0x70, 0usize);
+    fixture._heap.put(equipment + 0x130, 0usize);
+    for count in [-1, pose::LIMIT as i32 + 1] {
+        fixture._heap.put(resource + 0x1C, count);
+        refresh(fixture.character.address, 1.0, 1);
+        let native_count = NATIVE.lock().unwrap().len();
+        assert_eq!(native_count, 0);
+        assert!(REGISTRY.read().unwrap().is_empty());
+        assert_eq!(REJECTED.lock().unwrap().len(), 1);
+        suspend();
+    }
+}
+
+#[test]
+fn equipment_without_bones_stays_native_until_resource_changes() {
+    let fixture = NativeTest::new();
+    let equipment = ptr(fixture.slot).unwrap();
+    let item = ptr(equipment + 0x10).unwrap();
+    let exporter = ptr(item + 0x658).unwrap();
+    let resource = ptr(item + 0x68).unwrap();
+    let inverse = ptr(resource + 0x2F8).unwrap();
+    let skeleton = ptr(fixture.mapper + 0x90).unwrap();
+    let bones = ptr(skeleton + 8).unwrap();
+    fixture._heap.put(exporter + 0x70, 0usize);
+    fixture._heap.put(equipment + 0x130, 0usize);
+    fixture._heap.put(resource + 0x1C, 0i32);
+    fixture._heap.put(resource + 0x2F8, 0usize);
+    fixture._heap.put(skeleton + 8, 0usize);
+    refresh(fixture.character.address, 1.0, 1);
+    assert!(REGISTRY.read().unwrap().is_empty());
+    let native_count = NATIVE.lock().unwrap().len();
+    assert_eq!(native_count, 1, "boneless model must cache native behavior");
+    assert!(
+        REJECTED.lock().unwrap().is_empty(),
+        "boneless model must not queue retries"
+    );
+    for frame in 2..362 {
+        refresh(fixture.character.address, 1.0, frame);
+        assert_eq!(NATIVE.lock().unwrap().len(), 1);
+        assert!(REJECTED.lock().unwrap().is_empty());
+    }
+    assert_eq!(fixture.draw(), [[99.0; 12]; 4]);
+    fixture._heap.put(resource + 0x2F8, inverse);
+    fixture._heap.put(skeleton + 8, bones);
+    fixture._heap.put(resource + 0x1C, 4i32);
+    refresh(fixture.character.address, 1.0, 362);
+    assert!(NATIVE.lock().unwrap().is_empty());
+    assert_eq!(REGISTRY.read().unwrap().len(), 1);
+    assert!((fixture.draw()[2][3] - 1.1).abs() < 1e-5);
+}
 impl Heap {
     fn new() -> Self {
         Self {

@@ -524,6 +524,20 @@ fn mesh_skeleton(key: &Key) -> Option<Vec<Bone>> {
 
 fn bind(key: Key, identity: Identity, generation: u64, scale: f64, force: bool) -> Option<Binding> {
     let (source_identity, source_bones) = pose::skeleton(&read, key.source_meta)?;
+    // A valid empty FLVER has no skeleton to retarget. Cache native behavior
+    // instead of retrying a permanently absent mesh skeleton every 120 frames.
+    // Count and route changes still revoke the entry through NativeBinding.
+    if pose::bytes::<4>(&read, key.resource + 0x1C) == Some(0i32.to_le_bytes()) {
+        let native = NativeBinding {
+            key,
+            identity,
+            source: source_identity,
+            count: 0,
+        };
+        return native
+            .current(identity, BASE.load(Ordering::Acquire))
+            .then_some(Binding::Native(Box::new(native)));
+    }
     let source_bones = crate::equipment_retarget::animation_reference(source_bones);
     let mesh_bones =
         crate::equipment_retarget::equipment_mesh_reference(&source_bones, &mesh_skeleton(&key)?)
@@ -702,6 +716,12 @@ pub(crate) fn refresh(player: usize, scale: f32, generation: u64) {
                 let mut visited = HashSet::new();
                 for offset in [0x48, 0x68] {
                     let holder = ptr(exporter + offset + 8)?;
+                    // A mesh-only exporter has no cloth mapper list. Record
+                    // the empty edge so a later list invalidates this binding.
+                    if holder == 0 {
+                        route.push((exporter + offset + 8, 0));
+                        continue;
+                    }
                     route.extend([(exporter + offset + 8, holder), (holder, ptr(holder)?)]);
                     find_mappers(
                         provider(exporter + offset)?,

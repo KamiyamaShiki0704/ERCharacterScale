@@ -16,6 +16,8 @@ v2.55.0 支持自动检测玩家装备的骨架比例差异。
 
 - FLVER 保留新模型的参考姿态，蒙皮绑定与该姿态一致；不要在导出时把骨长烘焙回玩家原版比例。
 
+- 布料物理资产是可选的。没有 `_c.hkx`／`_c.clm2` 的装备也可以使用网格参考骨架进行重定向；无骨骼部件保留原生显示。
+
 - 头发、衣服物理资产的参考骨架、绑定、形状、约束长度和碰撞体按目标模型制作。
 
 DLL 将目标姿态传给装备自身的物理输入，保留游戏自由段模拟，再采用物理写回结果显示头发和衣服。它不负责将旧比例物理资产自动变形。玩家共享骨架与玩法碰撞保持原有数据。完整身体模型按参考腿长适配动画实际位移，按参考头部高度适配普通跟随镜头；指定镜头挂点的动作保留原生镜头。武器和收纳挂点跟随重定向后的身体，完整的同名手指关节用于校准新旧手掌的握持区域，避免沿用原版手腕到握点的距离；武器大小和原动画握持方向保持。双手握持按当前动画的两手关系及两侧手掌尺寸求解，保持目标骨长。脚部在落地且原生脚部 IK 启用时沿用原生接触高度和脚面方向，修正新腿长下的接触。修正后的同一份姿态同时用于装备显示和物理输入。
@@ -55,6 +57,8 @@ The initial intended use is a local-player full-body replacement. Preserve match
 The optional table above can exclude a model or force retargeting despite unchanged detected lengths. Use internal loaded model names, matched case-insensitively; names may differ from item IDs and file numbers. Conflicting overrides are rejected. Forcing does not bypass data validation. The earlier development field `models` is an alias for `force_models`. Set `enabled = false` inside `[retarget]` to disable retargeting. Restart after configuration changes.
 
 Validate first at overall scale 1.0, then test scale combinations, equipment changes and different actions. Unsupported bindings fall back to native behavior; unequipping or rebuilding revokes stale bindings. Automated geometry and owned-memory tests do not establish native cloth dynamics, GPU output or game-frame performance. These remain in-game acceptance items.
+
+Cloth physics assets are optional. Equipment without `_c.hkx` / `_c.clm2` files can retarget through its mesh reference skeleton. Parts with no bones retain native rendering.
 
 ## 验证边界 / Validation scope
 

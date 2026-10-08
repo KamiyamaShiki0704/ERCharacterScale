@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.55.2
+
+- Support equipment proportion retargeting without cloth physics assets.
+- Keep parts with no bones on the native rendering path without repeated binding attempts.
+- Refresh bindings when optional mapper lists or mesh resources change.
+
 ## 2.55.1
 
 - Improve seated poses, leg animation adaptation and ground contact with equipment of different proportions.

@@ -4,7 +4,7 @@
 
 通过 TOML 配置 Elden Ring 玩家与其他角色的整体体型比例，支持 SpEffect 触发和无条件缩放。
 
-[下载 v2.55.1](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.1) · [配置说明](docs/CONFIGURATION.md) · [版本记录](CHANGELOG.md)
+[下载 v2.55.2](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.2) · [配置说明](docs/CONFIGURATION.md) · [版本记录](CHANGELOG.md)
 
 ## 功能
 
@@ -18,13 +18,13 @@
 
 ## 本次更新
 
-改善坐姿与腿部动画适配、武器和道具挂点对齐，修正部分独立持握武器在双持状态下引起的抬臂。
+修正不带布料物理的装备无法进行比例重定向的问题；无骨骼部件保留原生显示，避免反复尝试绑定。
 
 ## 安装
 
 适用于 **Windows x64、离线 Elden Ring WW2.7.1.0 / game1.17.1**。其他程序版本需要另行验证。
 
-1. 从 [Release 页面](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.1) 下载 `ERCharacterScale-v2.55.1-windows-x64.zip`。
+1. 从 [Release 页面](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.2) 下载 `ERCharacterScale-v2.55.2-windows-x64.zip`。
 2. 将 `ERCharacterScale.dll` 和 `ERCharacterScale.toml` 放在同一目录，并使用现有 DLL 加载器加载该 DLL。
 3. 按需要编辑 TOML，然后启动游戏。之后修改配置文件，需要重启游戏生效。
 

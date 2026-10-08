@@ -1,0 +1,18 @@
+{
+  "version": "2.55.2",
+  "artifact": "ERCharacterScale.dll",
+  "platform": "windows-x86_64",
+  "configuration": "ERCharacterScale.toml",
+  "license": "MIT",
+  "features": [
+    "Configurable player and character scaling",
+    "Automatic equipment skeleton retargeting with optional cloth physics",
+    "Cross-character animation retargeting",
+    "Cloth, limb IK, weapon and attachment adaptation"
+  ],
+  "updates": [
+    "Support equipment retargeting without cloth physics assets",
+    "Keep boneless parts on the native rendering path",
+    "Refresh bindings when mapper lists or mesh resources change"
+  ]
+}
