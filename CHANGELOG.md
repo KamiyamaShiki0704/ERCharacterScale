@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.55.4
+
+- Fix scaling not activating with early DLL loading, including me3.
+- Retry task-system lookup during startup and stop retrying on shutdown or the startup deadline.
+
 ## 2.55.3
 
 - Fix repeated cloth resource processing on native equipment such as the Twinned Armor.
