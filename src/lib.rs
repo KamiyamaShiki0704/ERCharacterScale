@@ -40,6 +40,7 @@ mod unit_runtime;
 use eldenring::{
     cs::{CSTaskGroupIndex, CSTaskImp, ChrIns, PlayerIns, WorldChrMan},
     fd4::FD4TaskData,
+    util::system::SystemInitError,
 };
 use fromsoftware_shared::{FromStatic, SharedTaskImpExt};
 
@@ -73,6 +74,10 @@ const ENABLE_DETAILED_CLOTH_CHILD_LOGGING: bool = false;
 
 static STARTED: AtomicBool = AtomicBool::new(false);
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+// Loaders that start the DLL early (me3) can reach the task system lookup before
+// the CSTask singleton is registered; fromsoftware-rs then reports InvalidRva.
+const STARTUP_RETRY_LIMIT: Duration = Duration::from_secs(120);
+const STARTUP_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
 #[cfg(test)]
 #[derive(Clone, Copy)]
@@ -328,6 +333,32 @@ pub unsafe extern "C" fn DllMain(hmodule: usize, reason: u32) -> bool {
     }
 }
 
+/// Calls `attempt` until it returns something other than `InvalidRva`, pausing
+/// between tries while `keep_waiting` accepts the elapsed time. Returns the last
+/// result and the number of `InvalidRva` results that were retried.
+fn retry_while_unregistered<T>(
+    mut attempt: impl FnMut() -> Result<T, SystemInitError>,
+    mut keep_waiting: impl FnMut(Duration) -> bool,
+    mut pause: impl FnMut(),
+) -> (Result<T, SystemInitError>, u32) {
+    let started = Instant::now();
+    let mut retries = 0u32;
+    loop {
+        match attempt() {
+            Err(SystemInitError::InvalidRva) if keep_waiting(started.elapsed()) => {
+                pause();
+                // Shutdown or the deadline may have been reached during sleep.
+                // Do not perform (or count) another lookup after that boundary.
+                if !keep_waiting(started.elapsed()) {
+                    return (Err(SystemInitError::InvalidRva), retries);
+                }
+                retries = retries.saturating_add(1);
+            }
+            result => return (result, retries),
+        }
+    }
+}
+
 fn run_task_thread(hmodule: usize) {
     let thread_started = Instant::now();
     log::initialize(hmodule);
@@ -425,11 +456,16 @@ fn run_task_thread(hmodule: usize) {
         "[player-scale-no-bone] waiting for upstream ER 2.7 task system"
     ));
     let task_wait_started = Instant::now();
-    let cs_task = match CSTaskImp::wait_for_instance(Duration::MAX) {
+    let (task_lookup, task_retries) = retry_while_unregistered(
+        || CSTaskImp::wait_for_instance(Duration::MAX),
+        |elapsed| !SHUTDOWN.load(Ordering::Acquire) && elapsed < STARTUP_RETRY_LIMIT,
+        || std::thread::sleep(STARTUP_RETRY_INTERVAL),
+    );
+    let cs_task = match task_lookup {
         Ok(cs_task) => cs_task,
         Err(reason) => {
             log::line(format_args!(
-                "[player-scale-no-bone] failed to find upstream ER 2.7 task system: {reason}"
+                "[player-scale-no-bone] failed to find upstream ER 2.7 task system after {task_retries} retries: {reason}"
             ));
             STARTED.store(false, Ordering::Release);
             return;
@@ -437,6 +473,11 @@ fn run_task_thread(hmodule: usize) {
     };
     let task_wait_micros = task_wait_started.elapsed().as_micros();
 
+    if task_retries > 0 {
+        log::line(format_args!(
+            "[player-scale-no-bone] upstream ER 2.7 task system ready after {task_retries} retries"
+        ));
+    }
     log::line(format_args!(
         "[player-scale-no-bone] upstream ER 2.7 task system ready; registering scale task"
     ));
@@ -1849,6 +1890,94 @@ mod tests {
     #[test]
     fn scale_effects_fall_through_after_higher_priority_effect_is_removed() {
         assert_eq!(first_matching_scale(|sp_effect| sp_effect == 8020401), 3.0);
+    }
+
+    #[test]
+    fn task_lookup_retries_until_the_singleton_is_registered() {
+        let mut calls = 0;
+        let mut pauses = 0;
+        let (result, retries) = retry_while_unregistered(
+            || {
+                calls += 1;
+                if calls <= 3 {
+                    Err(SystemInitError::InvalidRva)
+                } else {
+                    Ok(calls)
+                }
+            },
+            |_| true,
+            || pauses += 1,
+        );
+        assert!(matches!(result, Ok(4)));
+        assert_eq!(retries, 3);
+        assert_eq!(pauses, 3);
+    }
+
+    #[test]
+    fn task_lookup_stops_retrying_when_waiting_is_refused() {
+        let calls = std::cell::Cell::new(0);
+        let (result, retries) = retry_while_unregistered(
+            || {
+                calls.set(calls.get() + 1);
+                Err::<(), _>(SystemInitError::InvalidRva)
+            },
+            |_| calls.get() <= 2,
+            || {},
+        );
+        assert!(matches!(result, Err(SystemInitError::InvalidRva)));
+        assert_eq!(retries, 2);
+        assert_eq!(calls.get(), 3);
+    }
+
+    #[test]
+    fn task_lookup_does_not_retry_a_timeout() {
+        let mut calls = 0;
+        let (result, retries) = retry_while_unregistered(
+            || {
+                calls += 1;
+                Err::<(), _>(SystemInitError::Timeout)
+            },
+            |_| true,
+            || {},
+        );
+        assert!(matches!(result, Err(SystemInitError::Timeout)));
+        assert_eq!(retries, 0);
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn task_lookup_found_at_once_never_pauses() {
+        let mut pauses = 0;
+        let (result, retries) = retry_while_unregistered(|| Ok(7), |_| true, || pauses += 1);
+        assert!(matches!(result, Ok(7)));
+        assert_eq!(retries, 0);
+        assert_eq!(pauses, 0);
+    }
+
+    #[test]
+    fn task_lookup_stops_before_retry_if_pause_reaches_shutdown_or_deadline() {
+        let waiting = std::cell::Cell::new(true);
+        let mut calls = 0;
+        let mut pauses = 0;
+        let (result, retries) = retry_while_unregistered(
+            || {
+                calls += 1;
+                if calls == 1 {
+                    Err(SystemInitError::InvalidRva)
+                } else {
+                    Ok(7)
+                }
+            },
+            |_| waiting.get(),
+            || {
+                pauses += 1;
+                waiting.set(false);
+            },
+        );
+        assert!(matches!(result, Err(SystemInitError::InvalidRva)));
+        assert_eq!(calls, 1, "stop conditions must prevent the next lookup");
+        assert_eq!(retries, 0);
+        assert_eq!(pauses, 1);
     }
 
     #[test]
