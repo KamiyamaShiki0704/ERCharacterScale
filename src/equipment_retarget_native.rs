@@ -41,12 +41,21 @@ const CAMERA_RVA: usize = 0x3B85C8;
 const CAMERA_GUARD: &[u8] = &[
     0x0F, 0xC6, 0xDB, 0x00, 0xF3, 0x0F, 0x10, 0xA3, 0x98, 0x01, 0x00, 0x00, 0x0F, 0xC6, 0xE4, 0x00,
 ];
+// ExFollowCam radial position, after native radius/ray normalization and
+// before its collision ray. Both lock-on and ordinary follow use this point.
+// The two normalization branches join here; do not hook inside either branch.
+const CAMERA_DISTANCE_RVA: usize = 0x3BAAC0;
+const CAMERA_DISTANCE_GUARD: &[u8] = &[
+    0x0F, 0xC6, 0xC0, 0x00, 0x0F, 0x59, 0xC3, 0x0F, 0x58, 0xC4, 0x0F, 0x29, 0x81, 0x00, 0x01, 0x00,
+];
 #[path = "equipment_retarget_attachments.rs"]
 mod attachments;
 #[path = "equipment_retarget_dummies.rs"]
 mod dummies;
 #[path = "equipment_retarget_hook.rs"]
 mod mid_hook;
+#[path = "equipment_retarget_recovery.rs"]
+mod recovery;
 #[path = "equipment_retarget_weapon.rs"]
 mod weapon;
 
@@ -184,6 +193,9 @@ pub(crate) fn install(base: usize) -> bool {
         (LAZY_MODEL_CONSUMER_RVA, LAZY_MODEL_CONSUMER_GUARD),
         (MOTION_RVA, MOTION_GUARD),
         (CAMERA_RVA, CAMERA_GUARD),
+        (CAMERA_DISTANCE_RVA, CAMERA_DISTANCE_GUARD),
+        (recovery::RESET_RVA, recovery::RESET_GUARD),
+        (recovery::CONSUME_RVA, recovery::CONSUME_GUARD),
         (attachments::RVA, attachments::GUARD),
         (dummies::RVAS[0], dummies::GUARD),
         (dummies::RVAS[1], dummies::GUARD),
@@ -224,6 +236,11 @@ pub(crate) fn install(base: usize) -> bool {
     };
     let camera_hook = unsafe { mid_hook::install(base + CAMERA_RVA, camera_hook) };
     let Ok(camera_hook) = camera_hook else {
+        return false;
+    };
+    let camera_distance_hook =
+        unsafe { mid_hook::install(base + CAMERA_DISTANCE_RVA, camera_distance_hook) };
+    let Ok(camera_distance_hook) = camera_distance_hook else {
         return false;
     };
     let attachment_hook = unsafe {
@@ -268,6 +285,7 @@ pub(crate) fn install(base: usize) -> bool {
     let _ = Box::leak(Box::new(attachment_hook));
     let _ = Box::leak(Box::new(motion_hook));
     let _ = Box::leak(Box::new(camera_hook));
+    let _ = Box::leak(Box::new(camera_distance_hook));
     let _ = Box::leak(Box::new(hook));
     let _ = Box::leak(Box::new(matrix_hook));
     READY.store(true, Ordering::Release);
@@ -351,6 +369,8 @@ struct Work {
     scale: f64,
     prepared: Option<u64>,
     solver_completed: Option<u64>,
+    recovery_pending: bool,
+    recovery_attempts: u8,
     source: PoseScratch,
     solved: PoseScratch,
     mesh: Frame,
@@ -598,6 +618,8 @@ fn bind(key: Key, identity: Identity, generation: u64, scale: f64, force: bool) 
         scale,
         prepared: None,
         solver_completed: None,
+        recovery_pending: false,
+        recovery_attempts: 0,
         source: PoseScratch::default(),
         solved: PoseScratch::default(),
         mesh: mesh_plan.new_frame(),
@@ -889,11 +911,33 @@ impl SolverInput {
         });
     }
     pub fn context(&mut self) -> usize {
+        self.recover_if_pending();
         let storage = self.storage.as_mut().unwrap();
         storage.header.0[1] = storage.local.as_mut_ptr() as usize;
         storage.header.0[3] = storage.model.as_mut_ptr() as usize;
         storage.header.0[5] = storage.flags.as_mut_ptr() as usize;
         storage.header.0.as_mut_ptr() as usize
+    }
+
+    fn recover_if_pending(&self) {
+        crate::memory_query::scoped(|| {
+            if !self.session.current() {
+                return;
+            }
+            let Ok(mut work) = self.session.work.lock() else {
+                return;
+            };
+            if work.generation != self.generation
+                || !work.recovery_pending
+                || work.recovery_attempts >= 3
+            {
+                return;
+            }
+            if recovery::request_reset(&self.session).is_some() {
+                work.recovery_pending = false;
+                work.recovery_attempts += 1;
+            }
+        });
     }
 }
 
@@ -982,6 +1026,20 @@ extern "win64" fn camera_hook(registers: *mut Registers) {
 }
 
 fn adjust_camera(r: &mut Registers, base: usize, world: usize, manager: usize) -> Option<()> {
+    let profile = camera_profile(r, base, world, manager)?;
+    let height = f32::from_bits(r.xmm3 as u32);
+    let height = profile.camera_height(height)?;
+    // Change the consumed register, never persistently edit camera params.
+    r.xmm3 = (r.xmm3 & !u128::from(u32::MAX)) | u128::from(height.to_bits());
+    Some(())
+}
+
+fn camera_profile(
+    r: &Registers,
+    base: usize,
+    world: usize,
+    manager: usize,
+) -> Option<MotionProfile> {
     let player = ptr(world + 0x1E508)?;
     // Sole native caller keeps its followed character in R15.
     if r.r15 as usize != player {
@@ -996,11 +1054,37 @@ fn adjust_camera(r: &mut Registers, base: usize, world: usize, manager: usize) -
     if override_id >= 0 {
         return None;
     }
-    let profile = player_motion(player)?;
-    let height = f32::from_bits(r.xmm3 as u32);
-    let height = profile.camera_height(height)?;
-    // Change the consumed register, never persistently edit camera params.
-    r.xmm3 = (r.xmm3 & !u128::from(u32::MAX)) | u128::from(height.to_bits());
+    player_motion(player)
+}
+
+extern "win64" fn camera_distance_hook(registers: *mut Registers) {
+    let r = unsafe { &mut *registers };
+    let _ = crate::memory_query::scoped(|| -> Option<()> {
+        let base = BASE.load(Ordering::Acquire);
+        let world = ptr(base + 0x3D69FF8)?;
+        let manager = ptr(base + 0x3D6D988)?;
+        adjust_camera_distance(r, base, world, manager)
+    });
+}
+
+fn adjust_camera_distance(
+    r: &mut Registers,
+    base: usize,
+    world: usize,
+    manager: usize,
+) -> Option<()> {
+    if r.rcx != r.rbx {
+        return None;
+    }
+    let profile = camera_profile(r, base, world, manager)?;
+    let factor = f32::from_bits(r.xmm0 as u32);
+    let output = (f64::from(factor) * profile.height_ratio) as f32;
+    if !factor.is_finite() || factor <= 0.0 || !output.is_finite() || output <= 0.0 {
+        return None;
+    }
+    // XMM0 is radius / ray length; preserve the ray, target, FOV, authored
+    // radius and smoothing state. Native collision consumes the scaled ray.
+    r.xmm0 = (r.xmm0 & !u128::from(u32::MAX)) | u128::from(output.to_bits());
     Some(())
 }
 
@@ -1138,26 +1222,37 @@ fn render_range(registers: *mut Registers, original: usize, matrix4: bool) -> us
                 session.cloth_bones.len(),
                 &read,
             )?;
-            work.solved.capture_model(
-                &read,
-                session.key.input + 0x48,
-                identity,
-                &session.cloth_bones,
-                1.0,
-            )?;
-            // Native writeback scale convention is asymmetric; reconcile only
-            // rows explicitly written by the solver, never infer from magnitude.
-            for (i, mapped) in session.mesh_to_cloth.iter().enumerate() {
-                if let Some(source) = mapped.filter(|&index| mask.contains(index)) {
-                    let mut m = work.solved.model[source];
-                    m.x_axis *= work.scale;
-                    m.y_axis *= work.scale;
-                    m.z_axis *= work.scale;
-                    m.w_axis.x /= work.scale;
-                    m.w_axis.y /= work.scale;
-                    m.w_axis.z /= work.scale;
-                    work.render[i] = m;
-                    work.overridden[i] = true;
+            let solved = work
+                .solved
+                .capture_model(
+                    &read,
+                    session.key.input + 0x48,
+                    identity,
+                    &session.cloth_bones,
+                    1.0,
+                )
+                .is_some();
+            if !solved {
+                // A failed simulation must not revoke the valid animated body.
+                // Use its current target pose until native physics reinitializes.
+                work.recovery_pending |= work.solved.invalid_transform;
+            } else {
+                work.recovery_pending = false;
+                work.recovery_attempts = 0;
+                // Native writeback scale convention is asymmetric; reconcile only
+                // rows explicitly written by the solver, never infer from magnitude.
+                for (i, mapped) in session.mesh_to_cloth.iter().enumerate() {
+                    if let Some(source) = mapped.filter(|&index| mask.contains(index)) {
+                        let mut m = work.solved.model[source];
+                        m.x_axis *= work.scale;
+                        m.y_axis *= work.scale;
+                        m.z_axis *= work.scale;
+                        m.w_axis.x /= work.scale;
+                        m.w_axis.y /= work.scale;
+                        m.w_axis.z /= work.scale;
+                        work.render[i] = m;
+                        work.overridden[i] = true;
+                    }
                 }
             }
         }

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.55.5
+
+- Adapt lock-on camera height and distance to equipment proportions.
+- Preserve equipment proportions when physics poses become invalid and request a bounded native simulation reset. Recovery from intermittent physics failures still needs in-game confirmation.
+
 ## 2.55.4
 
 - Fix scaling not activating with early DLL loading, including me3.

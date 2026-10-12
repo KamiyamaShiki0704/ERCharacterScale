@@ -49,6 +49,197 @@ fn camera_updates_consumed_height_only_and_respects_explicit_camera_override() {
 }
 
 #[test]
+fn camera_locked_distance_follows_body_height_without_changing_enemy_parameters() {
+    let mut fixture = NativeTest::new();
+    refresh(fixture.character.address, 1.0, 1);
+    Arc::get_mut(&mut REGISTRY.write().unwrap()[0])
+        .unwrap()
+        .motion = Some(MotionProfile {
+        leg_ratio: 0.75,
+        height_ratio: 0.6,
+    });
+    let world = fixture._heap.alloc(0x1F000);
+    let camera = fixture._heap.alloc(0x100);
+    let follow = fixture._heap.alloc(0x200);
+    let manager = fixture._heap.alloc(0x100);
+    fixture
+        ._heap
+        .put(world + 0x1E508, fixture.character.address);
+    fixture._heap.put(world + 0x1ECE0, camera);
+    fixture._heap.put(camera + 0x60, follow);
+    fixture._heap.put(follow, TEST_BASE + 0x2A2ACA0);
+    fixture._heap.put(manager + 0x50, -1i32);
+    fixture._heap.put(manager + 0x54, 3251i32);
+    fixture._heap.put(follow + 0x1b4, 6.0f32);
+    let high = 0x1234_5678_9ABC_DEF0_1234_5678_0000_0000u128;
+    let mut r: Registers = unsafe { std::mem::zeroed() };
+    r.r15 = fixture.character.address as u64;
+    r.rbx = follow as u64;
+    r.rcx = follow as u64;
+    r.xmm1 = u128::from(6.0f32.to_bits());
+    r.xmm3 = u128::from(1.42f32.to_bits());
+    for _ in 0..20 {
+        r.xmm0 = high | u128::from(1.0f32.to_bits()); // Native radius / ray length.
+        adjust_camera_distance(&mut r, TEST_BASE, world, manager).unwrap();
+        assert!((f32::from_bits(r.xmm0 as u32) * 6.0 - 3.6).abs() < 1e-6);
+        assert_eq!(r.xmm0 & !u128::from(u32::MAX), high);
+        assert_eq!(r.xmm1, u128::from(6.0f32.to_bits()));
+        assert_eq!(r.xmm3, u128::from(1.42f32.to_bits()));
+        assert_eq!(
+            pose::bytes::<4>(&read, follow + 0x1b4),
+            Some(6.0f32.to_le_bytes())
+        );
+        assert_eq!(
+            pose::bytes::<4>(&read, manager + 0x54),
+            Some(3251i32.to_le_bytes())
+        );
+    }
+    fixture._heap.put(manager + 0x50, 220i32);
+    r.xmm0 = high | u128::from(1.0f32.to_bits());
+    assert!(adjust_camera_distance(&mut r, TEST_BASE, world, manager).is_none());
+    assert_eq!(f32::from_bits(r.xmm0 as u32), 1.0);
+    fixture._heap.put(manager + 0x50, -1i32);
+    r.rbx += 8;
+    assert!(adjust_camera_distance(&mut r, TEST_BASE, world, manager).is_none());
+}
+
+#[test]
+fn invalid_simulated_hair_does_not_discard_body_retargeting_or_propagate_nan() {
+    let fixture = NativeTest::new();
+    refresh(fixture.character.address, 1.0, 1);
+    let mut private = solver_input(fixture.inner, fixture.input + 0x48, fixture.transform).unwrap();
+    private.context();
+    private.completed();
+    fixture
+        ._heap
+        .put(fixture.input_models + 3 * 48, [f32::NAN; 12]);
+    let output = fixture.draw();
+    assert!(
+        (output[2][3] - 1.1).abs() < 1e-6,
+        "bad cloth discarded the valid body pose"
+    );
+    assert!(
+        output.iter().flatten().all(|v| v.is_finite()),
+        "invalid cloth reached rendering"
+    );
+    assert!(
+        (output[3][3] - 1.3).abs() < 1e-6,
+        "hair did not fall back to its target pose"
+    );
+}
+
+fn add_recovery_group(fixture: &mut NativeTest) -> (usize, usize, usize) {
+    let core = ptr(fixture.inner + 0x30).unwrap();
+    let h = &mut fixture._heap;
+    let holders = h.alloc(8);
+    let holder = h.alloc(0x60);
+    let root = h.alloc(0x120);
+    let asset = h.alloc(0x80);
+    let children = h.alloc(8);
+    let child = h.alloc(0x60);
+    let states = h.alloc(8);
+    let state = h.alloc(0x60);
+    let indices = h.alloc(4);
+    for (at, value) in [
+        (core + 0x28, holders),
+        (core + 0x30, holders + 8),
+        (holders, holder),
+        (holder, root),
+        (root + 0x18, asset),
+        (root + 0x40, children),
+        (children, child),
+        (asset + 0x60, states),
+        (states, state),
+        (state + 0x50, indices),
+    ] {
+        h.put(at, value);
+    }
+    h.put(root + 0x48, 1i32);
+    h.put(root + 0x114, 0i32);
+    h.put(asset + 0x68, 1i32);
+    h.put(state + 0x58, 1i32);
+    h.put(indices, 0i32);
+    h.put(child + 0x50, 17u32);
+    (holder, child, indices)
+}
+
+#[test]
+fn bad_physics_requests_native_reset_once_and_revoked_input_cannot_reset() {
+    let mut fixture = NativeTest::new();
+    let (holder, child, _) = add_recovery_group(&mut fixture);
+    refresh(fixture.character.address, 1.0, 1);
+    let mut input = solver_input(fixture.inner, fixture.input + 0x48, fixture.transform).unwrap();
+    input.context();
+    input.completed();
+    fixture
+        ._heap
+        .put(fixture.input_models + 3 * 48, [f32::NAN; 12]);
+    assert!((fixture.draw()[2][3] - 1.1).abs() < 1e-6);
+    let mut repair = solver_input(fixture.inner, fixture.input + 0x48, fixture.transform).unwrap();
+    assert_eq!(
+        pose::bytes::<4>(&read, child + 0x50),
+        Some(17u32.to_le_bytes())
+    );
+    repair.context();
+    assert_eq!(
+        pose::bytes::<4>(&read, child + 0x50),
+        Some(0u32.to_le_bytes())
+    );
+    assert_eq!(pose::bytes::<1>(&read, holder + 0x4f), Some([1]));
+    fixture._heap.put(child + 0x50, 9u32);
+    fixture._heap.put(holder + 0x4f, 0u8);
+    repair.context();
+    assert_eq!(
+        pose::bytes::<4>(&read, child + 0x50),
+        Some(9u32.to_le_bytes())
+    );
+    repair.completed();
+    fixture.draw();
+    let mut revoked = solver_input(fixture.inner, fixture.input + 0x48, fixture.transform).unwrap();
+    fixture._heap.put(fixture.slot, 0usize);
+    revoked.context();
+    assert_eq!(
+        pose::bytes::<4>(&read, child + 0x50),
+        Some(9u32.to_le_bytes())
+    );
+    assert_eq!(pose::bytes::<1>(&read, holder + 0x4f), Some([0]));
+}
+
+#[test]
+fn unreadable_or_rebuilt_pose_and_bad_active_indices_do_not_reset_physics() {
+    let mut fixture = NativeTest::new();
+    let (holder, child, indices) = add_recovery_group(&mut fixture);
+    refresh(fixture.character.address, 1.0, 1);
+    let mut input = solver_input(fixture.inner, fixture.input + 0x48, fixture.transform).unwrap();
+    input.context();
+    input.completed();
+    fixture._heap.put(fixture.input + 0x48 + 0x10, 3i32);
+    assert!((fixture.draw()[2][3] - 1.1).abs() < 1e-6);
+    let pending = REGISTRY.read().unwrap()[0]
+        .work
+        .lock()
+        .unwrap()
+        .recovery_pending;
+    assert!(
+        !pending,
+        "layout failure was classified as corrupt simulation"
+    );
+    fixture._heap.put(fixture.input + 0x48 + 0x10, 4i32);
+    fixture
+        ._heap
+        .put(fixture.input_models + 3 * 48, [f32::NAN; 12]);
+    fixture.draw();
+    fixture._heap.put(indices, 1i32); // Outside the one-child array.
+    let mut repair = solver_input(fixture.inner, fixture.input + 0x48, fixture.transform).unwrap();
+    repair.context();
+    assert_eq!(
+        pose::bytes::<4>(&read, child + 0x50),
+        Some(17u32.to_le_bytes())
+    );
+    assert_eq!(pose::bytes::<1>(&read, holder + 0x4f), Some([0]));
+}
+
+#[test]
 fn motion_consumer_scales_fresh_animation_only_and_revokes_on_unequip() {
     let fixture = NativeTest::new();
     refresh(fixture.character.address, 2.0, 1);

@@ -49,6 +49,8 @@ mod tests {
         unsafe {
             (*registers).xmm3 =
                 ((*registers).xmm3 & !u128::from(u32::MAX)) | u128::from(0.85f32.to_bits());
+            (*registers).xmm0 =
+                ((*registers).xmm0 & !u128::from(u32::MAX)) | u128::from(0.6f32.to_bits());
             std::arch::asm!("pcmpeqd xmm4, xmm4", "pcmpeqd xmm5, xmm5", out("xmm4") _, out("xmm5") _, options(nostack));
         }
     }
@@ -66,18 +68,18 @@ mod tests {
         let page =
             Page(unsafe { VirtualAlloc(None, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE) });
         assert!(!page.0.is_null());
-        // Load XMM4/5/3, invoke a real installed trampoline between the loads
+        // Load XMM4/5/3/0, invoke a real installed trampoline between the loads
         // and consumers, then store all lanes. This catches ABI corruption that
         // calling the Rust callback with a fake Registers structure cannot.
         let mut code: Vec<u8> = vec![
             0x48, 0x83, 0xec, 0x28, 0x0f, 0x10, 0x21, 0x0f, 0x10, 0x69, 0x10, 0x0f, 0x10, 0x59,
-            0x20,
+            0x20, 0x0f, 0x10, 0x41, 0x30,
         ];
         let offset = code.len();
         code.extend([0x90; 32]);
         code.extend([
-            0x0f, 0x11, 0x21, 0x0f, 0x11, 0x69, 0x10, 0x0f, 0x11, 0x59, 0x20, 0x48, 0x83, 0xc4,
-            0x28, 0xc3,
+            0x0f, 0x11, 0x21, 0x0f, 0x11, 0x69, 0x10, 0x0f, 0x11, 0x59, 0x20, 0x0f, 0x11, 0x41,
+            0x30, 0x48, 0x83, 0xc4, 0x28, 0xc3,
         ]);
         unsafe {
             std::ptr::copy_nonoverlapping(code.as_ptr(), page.0.cast(), code.len());
@@ -91,6 +93,7 @@ mod tests {
             [-3.0, 2.0, 11.0, 1.0],
             [0.0, -0.25, 0.5, 0.75],
             [1.42, 7.0, 8.0, 9.0],
+            [1.0, 27.0, 28.0, 29.0],
         ];
         let hook = unsafe { install(page.0 as usize + offset, clobber_volatile_vectors) }.unwrap();
         let mut data = before;
@@ -109,5 +112,6 @@ mod tests {
             "live camera XMM5 changed across native trampoline"
         );
         assert_eq!(data[2], [0.85, 7.0, 8.0, 9.0]);
+        assert_eq!(data[3], [0.6, 27.0, 28.0, 29.0]);
     }
 }

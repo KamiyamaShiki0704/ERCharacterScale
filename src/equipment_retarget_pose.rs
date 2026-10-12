@@ -247,6 +247,7 @@ pub(crate) fn skeleton(
 
 #[derive(Default)]
 pub(crate) struct PoseScratch {
+    pub invalid_transform: bool,
     raw_local: Vec<u8>,
     raw_model: Vec<u8>,
     flags: Vec<u8>,
@@ -321,6 +322,7 @@ impl PoseScratch {
         skeleton: &[Bone],
         overall_scale: f64,
     ) -> Option<()> {
+        self.invalid_transform = false;
         self.local.clear();
         if !overall_scale.is_finite() || overall_scale <= 0.0 || !identity.current(read) {
             return None;
@@ -349,10 +351,20 @@ impl PoseScratch {
             if flags & 3 == 3 {
                 return None;
             }
-            self.model[i] = if flags & 2 == 0 {
-                matrix(qs(&self.raw_model[i * 48..(i + 1) * 48])?)
+            let raw = if flags & 2 == 0 {
+                &self.raw_model
             } else {
-                let local = matrix(qs(&self.raw_local[i * 48..(i + 1) * 48])?);
+                &self.raw_local
+            };
+            let Some(decoded) = qs(&raw[i * 48..(i + 1) * 48]) else {
+                self.invalid_transform =
+                    bytes(read, context) == Some(header) && identity.current(read);
+                return None;
+            };
+            self.model[i] = if flags & 2 == 0 {
+                matrix(decoded)
+            } else {
+                let local = matrix(decoded);
                 bone.parent.map_or(local, |p| self.model[p] * local)
             };
         }
@@ -360,6 +372,8 @@ impl PoseScratch {
         for m in &mut self.model {
             *m = undo * *m;
             if !m.is_finite() {
+                self.invalid_transform =
+                    bytes(read, context) == Some(header) && identity.current(read);
                 return None;
             }
         }
