@@ -1,4 +1,4 @@
-use eldenring::cs::PlayerIns;
+use crate::native_access::CharacterAccess;
 use windows::Win32::System::Memory::{
     MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY,
     PAGE_GUARD, PAGE_NOACCESS, PAGE_READWRITE, PAGE_WRITECOPY, VirtualQuery,
@@ -21,12 +21,11 @@ pub struct HknpCapsuleBaseline {
 }
 
 pub fn scale_player_hknp_capsule_shape(
-    player: &mut PlayerIns,
+    player: &mut CharacterAccess,
     baseline: &mut Option<HknpCapsuleBaseline>,
     scale: f32,
 ) {
-    let physics = player.chr_ins.modules.as_mut().physics.as_mut();
-    let physics_addr = physics as *mut _ as usize;
+    let physics_addr = player.physics_address();
     let shape_addr = read_usize(physics_addr + PHYSICS_HK_COLLISION_SHAPE_OFFSET).unwrap_or(0);
 
     if shape_addr == 0 {

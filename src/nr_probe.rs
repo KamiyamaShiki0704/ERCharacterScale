@@ -1608,7 +1608,7 @@ fn sanitize_utf16_context(bytes: &[u8], index: usize) -> String {
     let start = index.saturating_sub(64) & !1;
     let end = ((index + 128).min(bytes.len())) & !1;
     let mut text = String::new();
-    for pair in bytes[start..end].chunks_exact(2) {
+    for pair in bytes[start..end].as_chunks::<2>().0.iter() {
         let value = u16::from_le_bytes([pair[0], pair[1]]);
         let ch = char::from_u32(value as u32).unwrap_or('.');
         if ch.is_ascii_graphic() || ch == ' ' {

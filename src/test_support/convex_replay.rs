@@ -17,7 +17,9 @@ fn c3185_live_resources_pass_preflight_and_restore() {
     for row in records.iter().filter(|r| r[0] == "R") {
         let bytes: Vec<u8> = row[2]
             .as_bytes()
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|s| u8::from_str_radix(std::str::from_utf8(s).unwrap(), 16).unwrap())
             .collect();
         let mut heap = vec![0u128; bytes.len().div_ceil(16)];

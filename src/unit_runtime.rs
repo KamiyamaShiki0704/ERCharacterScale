@@ -1,11 +1,10 @@
 //! Loaded character identity, bounded enumeration, and native enemy relations.
+use crate::native_access::{CharacterAccess, WorldAccess, offset as field_offset};
 use crate::{body_scale_port, cloth_owner_scope, config, memory_query};
-use eldenring::cs::{
-    CSChrPhysicsModule, ChrCtrl, ChrIns, ChrInsModuleContainer, ChrSet, ChrSetEntry, WorldChrMan,
-};
+use shikifsrs_elden_ring::storage_facts::{NativeStorageField as Field, *};
 use std::{
     collections::{HashMap, HashSet},
-    mem::{offset_of, size_of},
+    mem::size_of,
     sync::Arc,
 };
 
@@ -78,37 +77,37 @@ impl Identity {
         Self::capture_checked(address, true)
     }
     fn capture_checked(address: usize, active: bool) -> Option<Self> {
-        accessible(address, size_of::<ChrIns>(), true)?;
-        let entry = read::<usize>(address + offset_of!(ChrIns, chr_set_entry))?;
+        accessible(address, CHARACTER_SELECTED_EXTENT, true)?;
+        let entry = read::<usize>(address + field_offset(Field::CharacterEntry))?;
         if read::<usize>(entry)? != address
             || (active && read::<u8>(entry + 8)? != ACTIVE_ENTRY_STATE)
         {
             return None;
         }
-        let control = read::<usize>(address + offset_of!(ChrIns, chr_ctrl))?;
-        let modules = read::<usize>(address + offset_of!(ChrIns, modules))?;
-        accessible(modules, size_of::<ChrInsModuleContainer>(), false)?;
-        let physics = read::<usize>(modules + offset_of!(ChrInsModuleContainer, physics))?;
-        let effects = read::<usize>(address + offset_of!(ChrIns, special_effect))?;
-        accessible(control, size_of::<ChrCtrl>(), true)?;
-        accessible(physics, size_of::<CSChrPhysicsModule>(), true)?;
+        let control = read::<usize>(address + field_offset(Field::CharacterController))?;
+        let modules = read::<usize>(address + field_offset(Field::CharacterModules))?;
+        accessible(modules, MODULES_SELECTED_EXTENT, false)?;
+        let physics = read::<usize>(modules + field_offset(Field::ModulesPhysics))?;
+        let effects = read::<usize>(address + field_offset(Field::CharacterEffects))?;
+        accessible(control, CONTROLLER_SELECTED_EXTENT, true)?;
+        accessible(physics, PHYSICS_SELECTED_EXTENT, true)?;
         accessible(effects, 0x18, false)?;
-        if read::<usize>(control + offset_of!(ChrCtrl, owner))? != address
-            || read::<usize>(physics + offset_of!(CSChrPhysicsModule, owner))? != address
+        if read::<usize>(control + field_offset(Field::ControllerOwner))? != address
+            || read::<usize>(physics + field_offset(Field::PhysicsOwner))? != address
             || read::<usize>(effects + 0x10)? != address
         {
             return None;
         }
-        accessible(control, size_of::<ChrCtrl>(), true)?;
-        accessible(physics, size_of::<CSChrPhysicsModule>(), true)?;
-        let model = read::<usize>(address + offset_of!(ChrIns, chr_model_ins))?;
+        accessible(control, CONTROLLER_SELECTED_EXTENT, true)?;
+        accessible(physics, PHYSICS_SELECTED_EXTENT, true)?;
+        let model = read::<usize>(address + field_offset(Field::CharacterModel))?;
         if model == 0 {
             return None;
         }
         for offset in [
-            offset_of!(ChrCtrl, scale_size_x),
-            offset_of!(ChrCtrl, scale_size_y),
-            offset_of!(ChrCtrl, scale_size_z),
+            field_offset(Field::ControllerScaleX),
+            field_offset(Field::ControllerScaleY),
+            field_offset(Field::ControllerScaleZ),
         ] {
             let value = read::<f32>(control + offset)?;
             if !value.is_finite() || value <= 0.0 {
@@ -116,11 +115,11 @@ impl Identity {
             }
         }
         for offset in [
-            offset_of!(CSChrPhysicsModule, chr_hit_height),
-            offset_of!(CSChrPhysicsModule, chr_hit_radius),
-            offset_of!(CSChrPhysicsModule, hit_height),
-            offset_of!(CSChrPhysicsModule, hit_radius),
-            offset_of!(CSChrPhysicsModule, weight),
+            field_offset(Field::PhysicsCharacterHeight),
+            field_offset(Field::PhysicsCharacterRadius),
+            field_offset(Field::PhysicsMapHeight),
+            field_offset(Field::PhysicsMapRadius),
+            field_offset(Field::PhysicsWeight),
         ] {
             let value = read::<f32>(physics + offset)?;
             if !value.is_finite() || value < 0.0 {
@@ -129,9 +128,9 @@ impl Identity {
         }
         Some(Self {
             address,
-            role: read(address + offset_of!(ChrIns, chr_type))?,
+            role: read(address + field_offset(Field::CharacterRawKind))?,
             vtable: read(address)?,
-            handle: read(address + offset_of!(ChrIns, field_ins_handle))?,
+            handle: read(address + field_offset(Field::CharacterIdentifier))?,
             entry,
             model,
             control,
@@ -141,9 +140,9 @@ impl Identity {
             alternate_pose: read(address + 0x3A0)?,
             cloth_pose: read(address + 0x3A8)?,
             skeleton: read(address + 0x3B0)?,
-            character_id: read(address + offset_of!(ChrIns, character_id))?,
-            npc_param_id: read(address + offset_of!(ChrIns, npc_param_id))?,
-            entity_id: read(address + offset_of!(ChrIns, event_entity_id))?,
+            character_id: read(address + field_offset(Field::CharacterNumber))?,
+            npc_param_id: read(address + field_offset(Field::CharacterNpcRequest))?,
+            entity_id: read(address + field_offset(Field::CharacterStoredEvent))?,
         })
     }
     pub fn current(self) -> bool {
@@ -151,15 +150,15 @@ impl Identity {
     }
     fn instance_marker_current(self) -> bool {
         memory_query::scoped(|| {
-            accessible(self.address, size_of::<ChrIns>(), false).is_some()
-                && read::<u64>(self.address + offset_of!(ChrIns, field_ins_handle))
+            accessible(self.address, CHARACTER_SELECTED_EXTENT, false).is_some()
+                && read::<u64>(self.address + field_offset(Field::CharacterIdentifier))
                     == Some(self.handle)
-                && read::<usize>(self.address + offset_of!(ChrIns, chr_set_entry))
+                && read::<usize>(self.address + field_offset(Field::CharacterEntry))
                     == Some(self.entry)
                 && read::<usize>(self.entry) == Some(self.address)
-                && read::<u32>(self.address + offset_of!(ChrIns, character_id))
+                && read::<u32>(self.address + field_offset(Field::CharacterNumber))
                     == Some(self.character_id)
-                && read::<u32>(self.address + offset_of!(ChrIns, event_entity_id))
+                && read::<u32>(self.address + field_offset(Field::CharacterStoredEvent))
                     == Some(self.entity_id)
         })
     }
@@ -231,36 +230,32 @@ fn append_set_mode(
     seen: &mut HashSet<usize>,
     include_remote: bool,
 ) -> Option<()> {
-    accessible(set, size_of::<ChrSet<ChrIns>>(), false)?;
-    let capacity = read::<u32>(set + offset_of!(ChrSet<ChrIns>, capacity))? as usize;
-    let entries = read::<usize>(set + offset_of!(ChrSet<ChrIns>, entries))?;
+    accessible(set, SET_SELECTED_EXTENT, false)?;
+    let capacity = read::<u32>(set + field_offset(Field::SetCapacity))? as usize;
+    let entries = read::<usize>(set + field_offset(Field::SetEntries))?;
     if capacity > 8192 {
         return None;
     }
     if capacity == 0 {
         return Some(());
     }
-    accessible(
-        entries,
-        capacity.checked_mul(size_of::<ChrSetEntry<ChrIns>>())?,
-        false,
-    )?;
+    accessible(entries, capacity.checked_mul(SET_ENTRY_STRIDE)?, false)?;
     for i in 0..capacity {
-        let slot = entries + i * size_of::<ChrSetEntry<ChrIns>>();
+        let slot = entries + i * SET_ENTRY_STRIDE;
         if read::<u8>(slot + 8) != Some(ACTIVE_ENTRY_STATE) {
             continue;
         }
         let address = read::<usize>(slot)?;
         if address != 0
             && !seen.contains(&address)
-            && accessible(address, size_of::<ChrIns>(), false).is_some()
-            && read::<usize>(address + offset_of!(ChrIns, chr_set_entry)) == Some(slot)
+            && accessible(address, CHARACTER_SELECTED_EXTENT, false).is_some()
+            && read::<usize>(address + field_offset(Field::CharacterEntry)) == Some(slot)
         {
             // Filter using ChrIns::chr_type, not an unrelated entry byte.
             // EnemyApi::kind additionally validates class/vtable before writes.
             if !include_remote
                 && !matches!(
-                    read::<i32>(address + offset_of!(ChrIns, chr_type)),
+                    read::<i32>(address + field_offset(Field::CharacterRawKind)),
                     Some(0 | 5 | 6 | 7 | 19 | 20 | 21)
                 )
             {
@@ -274,9 +269,11 @@ fn append_set_mode(
 }
 
 /// Non-c0000 map characters live in EnemyIns collections, not the player set.
-/// c0000 NPC opponents are considered separately and retain PlayerIns layout.
-pub(crate) fn candidates(world: &WorldChrMan, local_player: usize) -> Vec<usize> {
-    let base = world as *const WorldChrMan as usize;
+/// c0000 NPC opponents retain their own selected field guards.
+/// Middle-set exclusions/inclusions below are experimental consumer role policies.
+/// SDK descriptors establish storage only; current-scene role acceptance is outstanding.
+pub(crate) fn candidates(world: &WorldAccess, local_player: usize) -> Vec<usize> {
+    let base = world.address;
     candidates_at(base, local_player)
 }
 
@@ -284,7 +281,7 @@ fn candidates_at(base: usize, local_player: usize) -> Vec<usize> {
     let mut excluded = Vec::new();
     let mut seen = HashSet::new();
     let _ = append_set_mode(
-        base + offset_of!(WorldChrMan, ghost_chr_set),
+        base + field_offset(Field::WorldEmbedded10f38),
         &mut excluded,
         &mut seen,
         true,
@@ -292,16 +289,16 @@ fn candidates_at(base: usize, local_player: usize) -> Vec<usize> {
     seen.insert(local_player);
     let mut result = Vec::new();
     for set in [
-        base + offset_of!(WorldChrMan, open_field_chr_set),
-        base + offset_of!(WorldChrMan, player_chr_set),
-        base + offset_of!(WorldChrMan, debug_chr_set),
-        base + offset_of!(WorldChrMan, summon_buddy_chr_set),
+        base + field_offset(Field::WorldOpenField),
+        base + field_offset(Field::WorldPlayers),
+        base + field_offset(Field::WorldCreation),
+        base + field_offset(Field::WorldEmbedded10f90),
     ] {
         let _ = append_set(set, &mut result, &mut seen);
     }
-    for i in 0..196 {
+    for i in 0..WORLD_INDEXED_SET_COUNT {
         if let Some(set) =
-            read::<usize>(base + offset_of!(WorldChrMan, chr_sets) + i * 8).filter(|p| *p != 0)
+            read::<usize>(base + field_offset(Field::WorldIndexedSets) + i * 8).filter(|p| *p != 0)
         {
             let _ = append_set(set, &mut result, &mut seen);
         }
@@ -309,22 +306,22 @@ fn candidates_at(base: usize, local_player: usize) -> Vec<usize> {
     result
 }
 
-fn all_consumers(world: &WorldChrMan) -> Vec<usize> {
-    let base = world as *const WorldChrMan as usize;
+fn all_consumers(world: &WorldAccess) -> Vec<usize> {
+    let base = world.address;
     let mut result = Vec::new();
     let mut seen = HashSet::new();
     for offset in [
-        offset_of!(WorldChrMan, ghost_chr_set),
-        offset_of!(WorldChrMan, summon_buddy_chr_set),
-        offset_of!(WorldChrMan, open_field_chr_set),
-        offset_of!(WorldChrMan, player_chr_set),
-        offset_of!(WorldChrMan, debug_chr_set),
+        field_offset(Field::WorldEmbedded10f38),
+        field_offset(Field::WorldEmbedded10f90),
+        field_offset(Field::WorldOpenField),
+        field_offset(Field::WorldPlayers),
+        field_offset(Field::WorldCreation),
     ] {
         let _ = append_set_mode(base + offset, &mut result, &mut seen, true);
     }
-    for i in 0..196 {
+    for i in 0..WORLD_INDEXED_SET_COUNT {
         if let Some(set) =
-            read::<usize>(base + offset_of!(WorldChrMan, chr_sets) + i * 8).filter(|p| *p != 0)
+            read::<usize>(base + field_offset(Field::WorldIndexedSets) + i * 8).filter(|p| *p != 0)
         {
             let _ = append_set_mode(set, &mut result, &mut seen, true);
         }
@@ -349,10 +346,10 @@ impl EnemyApi {
     pub fn kind(&self, address: usize) -> Option<bool> {
         // true = EnemyIns (including local debug/spirit units), false = local NPC
         // PlayerIns. Network players/phantoms and replay classes are rejected.
-        accessible(address, size_of::<ChrIns>(), false)?;
+        accessible(address, CHARACTER_SELECTED_EXTENT, false)?;
         let vtable = read::<usize>(address)?;
-        let role = read::<i32>(address + offset_of!(ChrIns, chr_type))?;
-        let model = read::<u32>(address + offset_of!(ChrIns, character_id))?;
+        let role = read::<i32>(address + field_offset(Field::CharacterRawKind))?;
+        let model = read::<u32>(address + field_offset(Field::CharacterNumber))?;
         if model == 8000 {
             return None;
         } // Torrent is never an enemy scaling target.
@@ -495,12 +492,11 @@ impl Runtime {
         }
     }
 
-    pub fn tick(&mut self, world: &WorldChrMan, frame: u64) -> TickStatus {
-        let Some(pointer) = world.main_player.as_ref() else {
+    pub fn tick(&mut self, world: &WorldAccess, frame: u64) -> TickStatus {
+        let Some(player_address) = world.primary_player() else {
             self.suspend();
             return TickStatus::MainPlayerUnavailable;
         };
-        let player_address = pointer.as_ptr() as usize;
         let Some(player) = memory_query::scoped(|| Identity::capture(player_address)) else {
             self.rejected(player_address, "main-player-identity-not-ready");
             self.suspend();
@@ -543,9 +539,7 @@ impl Runtime {
                 self.rejected(address, "identity-not-active-or-inconsistent");
                 continue;
             };
-            if !enemy_layout
-                && accessible(address, size_of::<eldenring::cs::PlayerIns>(), true).is_none()
-            {
+            if !enemy_layout && accessible(address, PLAYER_NPC_SELECTED_EXTENT, true).is_none() {
                 self.rejected(address, "player-layout-span-unavailable");
                 continue;
             }
@@ -602,7 +596,7 @@ impl Runtime {
             // their scale. This publishes state only; geometry is still untouched.
             if self.api.is_some() {
                 let scale = if crate::character_scale_supported(
-                    unsafe { &mut *(identity.address as *mut ChrIns) },
+                    &mut CharacterAccess::at(identity.address),
                     &record.state,
                     selection.scale,
                 ) {
@@ -688,13 +682,13 @@ impl Runtime {
                     let applied = if is_player || !enemy_layout {
                         // Only verified PlayerIns can access the PlayerIns tail.
                         crate::apply_player_scale(
-                            unsafe { &mut *(address as *mut eldenring::cs::PlayerIns) },
+                            &mut CharacterAccess::at(address),
                             &mut record.state,
                             scale,
                         )
                     } else {
                         crate::apply_character_scale(
-                            unsafe { &mut *(address as *mut ChrIns) },
+                            &mut CharacterAccess::at(address),
                             &mut record.state,
                             scale,
                         )
@@ -806,7 +800,7 @@ fn release_record(record: &mut UnitRecord) {
     // Lost/recycled identities are discarded without touching their old data.
     if record.identity.current() {
         body_scale_port::with_unit_state(&record.hooks, || {
-            let chr = unsafe { &mut *(record.identity.address as *mut ChrIns) };
+            let chr = &mut CharacterAccess::at(record.identity.address);
             if record.state.visual_baseline.is_some() {
                 crate::apply_visual_scale(chr, &mut record.state, 1.0);
             }
@@ -841,7 +835,7 @@ mod tests {
             body_scale_port::with_unit_state(&record.hooks, || {
                 assert_eq!(
                     crate::apply_character_scale(
-                        unsafe { &mut *(actor.address as *mut ChrIns) },
+                        &mut CharacterAccess::at(actor.address),
                         &mut record.state,
                         0.6
                     ),
@@ -925,43 +919,74 @@ mod tests {
     }
 
     #[test]
+    fn last_independently_proved_indexed_set_is_enumerated() {
+        let _environment = Environment::new();
+        let actor = Character::new(9520, 77, 1.0);
+        let mut world = vec![0u128; WORLD_SELECTED_EXTENT.div_ceil(16)];
+        let base = world.as_mut_ptr() as usize;
+        let set = base + field_offset(Field::WorldCreation);
+        unsafe {
+            ((set + field_offset(Field::SetCapacity)) as *mut u32).write(1);
+            ((set + field_offset(Field::SetEntries)) as *mut usize).write(actor.at(0xA000));
+            ((base + field_offset(Field::WorldIndexedSets) + (WORLD_INDEXED_SET_COUNT - 1) * 8)
+                as *mut usize)
+                .write(set);
+        }
+        // Remove embedded creation membership; last indexed entry remains the only route.
+        let detached_set = actor.at(0xE000);
+        unsafe {
+            ((detached_set + field_offset(Field::SetCapacity)) as *mut u32).write(1);
+            ((detached_set + field_offset(Field::SetEntries)) as *mut usize)
+                .write(actor.at(0xA000));
+            ((set + field_offset(Field::SetCapacity)) as *mut u32).write(0);
+            ((base + field_offset(Field::WorldIndexedSets) + (WORLD_INDEXED_SET_COUNT - 1) * 8)
+                as *mut usize)
+                .write(detached_set);
+        }
+        assert_eq!(candidates_at(base, 0), vec![actor.address]);
+        assert_eq!(
+            all_consumers(&WorldAccess { address: base }),
+            vec![actor.address]
+        );
+    }
+
+    #[test]
     fn model_rules_reach_debug_and_summon_sets_but_exclude_ghosts_and_remote_players() {
         let _environment = Environment::new();
         let debug = Character::new(9520, 1, 1.0);
-        debug.put(offset_of!(ChrIns, chr_type), 7i32);
+        debug.put(field_offset(Field::CharacterRawKind), 7i32);
         let buddy = Character::new(9520, 2, 1.0);
-        buddy.put(offset_of!(ChrIns, chr_type), 6i32);
+        buddy.put(field_offset(Field::CharacterRawKind), 6i32);
         let friendly_npc = Character::new(0, 3, 1.0);
         friendly_npc.put(0, BASE + PLAYER_VTABLE_RVA);
-        friendly_npc.put(offset_of!(ChrIns, chr_type), 19i32);
+        friendly_npc.put(field_offset(Field::CharacterRawKind), 19i32);
         let ghost = Character::new(9520, 4, 1.0);
         let remote = Character::new(0, 5, 1.0);
         remote.put(0, BASE + PLAYER_VTABLE_RVA);
-        remote.put(offset_of!(ChrIns, chr_type), 1i32);
-        // Raw owned bytes exercise the actual bounded reader without constructing
-        // a fake &WorldChrMan containing invalid Rust references or enum values.
-        let mut world = vec![0u128; size_of::<WorldChrMan>().div_ceil(16)];
+        remote.put(field_offset(Field::CharacterRawKind), 1i32);
+        // Raw owned bytes exercise bounded readers without native structure references.
+        let mut world = vec![0u128; WORLD_SELECTED_EXTENT.div_ceil(16)];
         let base = world.as_mut_ptr() as usize;
         let set = |offset: usize, actor: &Character| unsafe {
-            ((base + offset + offset_of!(ChrSet<ChrIns>, capacity)) as *mut u32).write(1);
-            ((base + offset + offset_of!(ChrSet<ChrIns>, entries)) as *mut usize)
+            ((base + offset + field_offset(Field::SetCapacity)) as *mut u32).write(1);
+            ((base + offset + field_offset(Field::SetEntries)) as *mut usize)
                 .write(actor.at(0xA000));
         };
-        set(offset_of!(WorldChrMan, debug_chr_set), &debug);
-        set(offset_of!(WorldChrMan, summon_buddy_chr_set), &buddy);
-        set(offset_of!(WorldChrMan, open_field_chr_set), &friendly_npc);
-        set(offset_of!(WorldChrMan, ghost_chr_set), &ghost);
-        set(offset_of!(WorldChrMan, player_chr_set), &remote);
+        set(field_offset(Field::WorldCreation), &debug);
+        set(field_offset(Field::WorldEmbedded10f90), &buddy);
+        set(field_offset(Field::WorldOpenField), &friendly_npc);
+        set(field_offset(Field::WorldEmbedded10f38), &ghost);
+        set(field_offset(Field::WorldPlayers), &remote);
         for (i, offset) in [
-            offset_of!(WorldChrMan, debug_chr_set),
-            offset_of!(WorldChrMan, summon_buddy_chr_set),
-            offset_of!(WorldChrMan, ghost_chr_set),
+            field_offset(Field::WorldCreation),
+            field_offset(Field::WorldEmbedded10f90),
+            field_offset(Field::WorldEmbedded10f38),
         ]
         .into_iter()
         .enumerate()
         {
             unsafe {
-                ((base + offset_of!(WorldChrMan, chr_sets) + i * 8) as *mut usize)
+                ((base + field_offset(Field::WorldIndexedSets) + i * 8) as *mut usize)
                     .write(base + offset);
             }
         }
@@ -990,7 +1015,7 @@ mod tests {
             );
         }
         assert_eq!(api.kind(remote.address), None);
-        buddy.put(offset_of!(ChrIns, character_id), 8000u32);
+        buddy.put(field_offset(Field::CharacterNumber), 8000u32);
         assert_eq!(api.kind(buddy.address), None);
     }
 
@@ -1000,11 +1025,11 @@ mod tests {
         // Live WW2.7.1.0 c9520 in debug_chr_set (also chr_sets[133]):
         // EnemyIns, role 7, reciprocal active entry [4,4].
         let actor = Character::new(9520, 1, 1.0);
-        actor.put(offset_of!(ChrIns, chr_type), 7i32);
+        actor.put(field_offset(Field::CharacterRawKind), 7i32);
         assert!(Identity::capture(actor.address).is_some());
-        let mut set = vec![0usize; size_of::<ChrSet<ChrIns>>().div_ceil(8)];
-        set[offset_of!(ChrSet<ChrIns>, capacity) / 8] = 1;
-        set[offset_of!(ChrSet<ChrIns>, entries) / 8] = actor.at(0xA000);
+        let mut set = vec![0usize; SET_SELECTED_EXTENT.div_ceil(8)];
+        set[field_offset(Field::SetCapacity) / 8] = 1;
+        set[field_offset(Field::SetEntries) / 8] = actor.at(0xA000);
         let mut output = Vec::new();
         let mut seen = HashSet::new();
         append_set(set.as_ptr() as usize, &mut output, &mut seen).unwrap();
@@ -1019,17 +1044,17 @@ mod tests {
         let _environment = Environment::new();
         let api = EnemyApi { base: BASE };
         let actor = Character::new(9520, 1, 1.0);
-        actor.put(offset_of!(ChrIns, chr_type), 7i32);
+        actor.put(field_offset(Field::CharacterRawKind), 7i32);
         assert_eq!(api.kind(actor.address), Some(true));
         actor.put(0, BASE + PLAYER_VTABLE_RVA);
         assert_eq!(api.kind(actor.address), None);
         actor.put(0, BASE + cloth_owner_scope::ENEMY_VTABLE_RVA);
         for role in [1i32, 2, 3, 4, 8, 19, 22] {
-            actor.put(offset_of!(ChrIns, chr_type), role);
+            actor.put(field_offset(Field::CharacterRawKind), role);
             assert_eq!(api.kind(actor.address), None);
         }
-        actor.put(offset_of!(ChrIns, chr_type), 7i32);
-        actor.put(offset_of!(ChrIns, character_id), 8000u32);
+        actor.put(field_offset(Field::CharacterRawKind), 7i32);
+        actor.put(field_offset(Field::CharacterNumber), 8000u32);
         assert_eq!(api.kind(actor.address), None);
     }
 
@@ -1040,7 +1065,7 @@ mod tests {
         // bytes [4, 4] at +8/+9. The adjacent byte is not a network role.
         let player = Character::new(0, 1, 1.0);
         player.put(0, BASE + PLAYER_VTABLE_RVA);
-        player.put(offset_of!(ChrIns, chr_type), 0i32);
+        player.put(field_offset(Field::CharacterRawKind), 0i32);
         player.put(0xA008, 4u8);
         player.put(0xA009, 4u8);
         assert!(
@@ -1051,9 +1076,9 @@ mod tests {
         enemy.put(0xA008, 4u8);
         enemy.put(0xA009, 4u8);
         assert!(Identity::capture(enemy.address).is_some());
-        let mut set = vec![0usize; size_of::<ChrSet<ChrIns>>().div_ceil(8)];
-        set[offset_of!(ChrSet<ChrIns>, capacity) / 8] = 1;
-        set[offset_of!(ChrSet<ChrIns>, entries) / 8] = enemy.at(0xA000);
+        let mut set = vec![0usize; SET_SELECTED_EXTENT.div_ceil(8)];
+        set[field_offset(Field::SetCapacity) / 8] = 1;
+        set[field_offset(Field::SetEntries) / 8] = enemy.at(0xA000);
         let mut output = Vec::new();
         append_set(set.as_ptr() as usize, &mut output, &mut HashSet::new()).unwrap();
         assert_eq!(output, vec![enemy.address]);
@@ -1123,18 +1148,18 @@ mod tests {
         let api = EnemyApi { base: BASE };
         let actor = Character::new(3250, 1, 1.0);
         assert_eq!(api.kind(actor.address), Some(true));
-        actor.put(offset_of!(ChrIns, chr_type), 3i32);
+        actor.put(field_offset(Field::CharacterRawKind), 3i32);
         assert_eq!(api.kind(actor.address), None);
-        actor.put(offset_of!(ChrIns, chr_type), 5i32);
-        actor.put(offset_of!(ChrIns, character_id), 8000u32);
+        actor.put(field_offset(Field::CharacterRawKind), 5i32);
+        actor.put(field_offset(Field::CharacterNumber), 8000u32);
         assert_eq!(api.kind(actor.address), None);
-        actor.put(offset_of!(ChrIns, character_id), 0u32);
+        actor.put(field_offset(Field::CharacterNumber), 0u32);
         actor.put(0, BASE + PLAYER_VTABLE_RVA);
         for role in [5i32, 19, 20, 21] {
-            actor.put(offset_of!(ChrIns, chr_type), role);
+            actor.put(field_offset(Field::CharacterRawKind), role);
             assert_eq!(api.kind(actor.address), Some(false));
         }
-        actor.put(offset_of!(ChrIns, chr_type), 1i32);
+        actor.put(field_offset(Field::CharacterRawKind), 1i32);
         assert_eq!(api.kind(actor.address), None);
         assert_eq!(api.kind(usize::MAX), None);
     }
@@ -1147,7 +1172,7 @@ mod tests {
         let hooks = record.hooks.clone();
         body_scale_port::with_unit_state(&hooks, || {
             crate::apply_character_scale(
-                unsafe { &mut *(actor.address as *mut ChrIns) },
+                &mut CharacterAccess::at(actor.address),
                 &mut record.state,
                 0.5,
             );
@@ -1160,21 +1185,21 @@ mod tests {
         );
         actor.put(0xA008, 4u8);
         actor.put(0xE000, BASE + cloth_owner_scope::CHARACTER_MODEL_VTABLE_RVA);
-        actor.put(offset_of!(ChrIns, chr_model_ins), actor.at(0xE000));
+        actor.put(field_offset(Field::CharacterModel), actor.at(0xE000));
         rebind_record(&mut record, actor.identity());
         let hooks = record.hooks.clone();
         body_scale_port::with_unit_state(&hooks, || {
             crate::apply_character_scale(
-                unsafe { &mut *(actor.address as *mut ChrIns) },
+                &mut CharacterAccess::at(actor.address),
                 &mut record.state,
                 1.0,
             );
         });
         assert_eq!(
-            actor.get::<f32>(0x2000 + offset_of!(ChrCtrl, scale_size_x)),
+            actor.get::<f32>(0x2000 + field_offset(Field::ControllerScaleX)),
             2.0
         );
-        actor.put(offset_of!(ChrIns, field_ins_handle), 900u64);
+        actor.put(field_offset(Field::CharacterIdentifier), 900u64);
         rebind_record(&mut record, actor.identity());
         assert!(record.state.visual_baseline.is_none());
         assert!(record.state.baseline.is_none());
@@ -1186,21 +1211,21 @@ mod tests {
     fn bad_owners_overflow_and_nonfinite_geometry_fail_before_writes() {
         let _environment = Environment::new();
         let actor = Character::new(2010, 1, 1.0);
-        actor.put(offset_of!(ChrIns, modules), usize::MAX);
+        actor.put(field_offset(Field::CharacterModules), usize::MAX);
         assert!(Identity::capture(actor.address).is_none());
-        actor.put(offset_of!(ChrIns, modules), actor.at(0x8000));
-        actor.put(offset_of!(ChrIns, chr_ctrl), usize::MAX);
+        actor.put(field_offset(Field::CharacterModules), actor.at(0x8000));
+        actor.put(field_offset(Field::CharacterController), usize::MAX);
         assert!(Identity::capture(actor.address).is_none());
-        actor.put(offset_of!(ChrIns, chr_ctrl), actor.at(0x2000));
-        actor.put(0x2000 + offset_of!(ChrCtrl, scale_size_x), f32::NAN);
+        actor.put(field_offset(Field::CharacterController), actor.at(0x2000));
+        actor.put(0x2000 + field_offset(Field::ControllerScaleX), f32::NAN);
         assert!(Identity::capture(actor.address).is_none());
-        actor.put(0x2000 + offset_of!(ChrCtrl, scale_size_x), f32::MAX);
+        actor.put(0x2000 + field_offset(Field::ControllerScaleX), f32::MAX);
         assert!(Identity::capture(actor.address).is_some());
-        let chr = unsafe { &mut *(actor.address as *mut ChrIns) };
+        let chr = &mut CharacterAccess::at(actor.address);
         let state = crate::ScaleState::default();
         assert!(crate::character_scale_supported(chr, &state, 0.1));
         assert!(!crate::character_scale_supported(chr, &state, 4.0));
-        actor.put(0x2000 + offset_of!(ChrCtrl, scale_size_x), 1.0f32);
+        actor.put(0x2000 + field_offset(Field::ControllerScaleX), 1.0f32);
         actor.put(0x9010, actor.address + 16);
         assert!(Identity::capture(actor.address).is_none());
         assert!(Identity::capture(usize::MAX).is_none());
@@ -1210,22 +1235,22 @@ mod tests {
     fn bounded_map_set_enumeration_deduplicates_and_keeps_remote_consumers_read_only() {
         let _environment = Environment::new();
         let actor = Character::new(3250, 1, 1.0);
-        let mut set = vec![0usize; size_of::<ChrSet<ChrIns>>().div_ceil(8)];
-        set[offset_of!(ChrSet<ChrIns>, capacity) / 8] = 1;
-        set[offset_of!(ChrSet<ChrIns>, entries) / 8] = actor.at(0xA000);
+        let mut set = vec![0usize; SET_SELECTED_EXTENT.div_ceil(8)];
+        set[field_offset(Field::SetCapacity) / 8] = 1;
+        set[field_offset(Field::SetEntries) / 8] = actor.at(0xA000);
         let mut seen = HashSet::new();
         let mut out = Vec::new();
         append_set(set.as_ptr() as usize, &mut out, &mut seen).unwrap();
         append_set(set.as_ptr() as usize, &mut out, &mut seen).unwrap();
         assert_eq!(out, vec![actor.address]);
-        actor.put(offset_of!(ChrIns, chr_type), 3i32);
+        actor.put(field_offset(Field::CharacterRawKind), 3i32);
         seen.clear();
         out.clear();
         append_set(set.as_ptr() as usize, &mut out, &mut seen).unwrap();
         assert!(out.is_empty());
         append_set_mode(set.as_ptr() as usize, &mut out, &mut seen, true).unwrap();
         assert_eq!(out, vec![actor.address]);
-        set[offset_of!(ChrSet<ChrIns>, capacity) / 8] = 8193;
+        set[field_offset(Field::SetCapacity) / 8] = 8193;
         assert!(append_set(set.as_ptr() as usize, &mut out, &mut seen).is_none());
     }
 }

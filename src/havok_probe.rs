@@ -1,4 +1,4 @@
-use eldenring::cs::PlayerIns;
+use crate::native_access::CharacterAccess;
 use windows::Win32::System::Memory::{
     MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_GUARD, PAGE_NOACCESS, VirtualQuery,
 };
@@ -33,14 +33,11 @@ const CHR_INS_UPDATE_TASKS: &[(&str, usize)] = &[
     ("update_behavior_task", 0x500),
 ];
 
-pub fn probe_player_havok_roots(player: &mut PlayerIns, scale: f32) {
-    let player_addr = player as *mut _ as usize;
-    let chr_ins = &mut player.chr_ins;
-    let chr_ins_addr = chr_ins as *mut _ as usize;
-    let chr_ctrl = chr_ins.chr_ctrl.as_mut();
-    let chr_ctrl_addr = chr_ctrl as *mut _ as usize;
-    let physics = chr_ins.modules.as_mut().physics.as_mut();
-    let physics_addr = physics as *mut _ as usize;
+pub fn probe_player_havok_roots(player: &mut CharacterAccess, scale: f32) {
+    let player_addr = player.address;
+    let chr_ins_addr = player.address;
+    let chr_ctrl_addr = player.controller_address();
+    let physics_addr = player.physics_address();
     let hk_collision_shape =
         read_usize(physics_addr + PHYSICS_HK_COLLISION_SHAPE_OFFSET).unwrap_or(0);
     let cloth_state = chr_ins_addr + CHR_INS_CLOTH_STATE_OFFSET;
@@ -51,8 +48,8 @@ pub fn probe_player_havok_roots(player: &mut PlayerIns, scale: f32) {
         scale, player_addr, chr_ins_addr, chr_ctrl_addr, physics_addr
     ));
 
-    log_root("ChrCtrl::chr_collision", chr_ctrl.chr_collision);
-    log_root("ChrCtrl::ragdoll_ins", chr_ctrl.ragdoll_ins);
+    log_root("ChrCtrl::chr_collision", player.controller_storage());
+    log_root("ChrCtrl::ragdoll_ins", player.ragdoll_address());
     log_root(
         "CSChrPhysicsModule+0xb0 hk_collision_shape",
         hk_collision_shape,
@@ -64,8 +61,8 @@ pub fn probe_player_havok_roots(player: &mut PlayerIns, scale: f32) {
     );
     log_root("ChrIns::chr_model_ins", chr_model_ins);
 
-    scan_pointer_fields("chr_collision", chr_ctrl.chr_collision);
-    scan_pointer_fields("ragdoll_ins", chr_ctrl.ragdoll_ins);
+    scan_pointer_fields("chr_collision", player.controller_storage());
+    scan_pointer_fields("ragdoll_ins", player.ragdoll_address());
     scan_pointer_fields_focused("hk_collision_shape", hk_collision_shape);
     scan_pointer_fields_focused("cloth_state", cloth_state);
     dump_words("hk_collision_shape", hk_collision_shape);

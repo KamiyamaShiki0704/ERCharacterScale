@@ -495,8 +495,10 @@ fn model_name(item: usize) -> Option<String> {
         return None;
     }
     String::from_utf16(
-        &raw.chunks_exact(2)
-            .map(|b| u16::from_le_bytes(b.try_into().unwrap()))
+        &raw.as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| u16::from_le_bytes(*b))
             .collect::<Vec<_>>(),
     )
     .ok()
@@ -517,7 +519,7 @@ fn mesh_skeleton(key: &Key) -> Option<Vec<Bone>> {
         return None;
     }
     let mut globals = Vec::with_capacity(count);
-    for raw in raw_bind.chunks_exact(48) {
+    for raw in raw_bind.as_chunks::<48>().0.iter() {
         let inverse = pose::affine(raw)?;
         if inverse.determinant().abs() < 1e-12 {
             return None;

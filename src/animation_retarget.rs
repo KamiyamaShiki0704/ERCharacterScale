@@ -154,7 +154,7 @@ impl ClipPlan {
             return None;
         }
         self.source.copy_from_slice(&self.reference);
-        for (&bone, qs) in self.track_bones.iter().zip(raw.chunks_exact(48)) {
+        for (&bone, qs) in self.track_bones.iter().zip(raw.as_chunks::<48>().0.iter()) {
             let q = sampled_pose(qs)?;
             if bone >= 0 {
                 self.source[bone as usize] = q;
@@ -197,7 +197,7 @@ fn sampled_pose(raw: &[u8]) -> Option<LocalPose> {
         .normalize()
         .to_array()
         .into_iter()
-        .zip(normalized[16..32].chunks_exact_mut(4))
+        .zip(normalized[16..32].as_chunks_mut::<4>().0.iter_mut())
     {
         out.copy_from_slice(&(value as f32).to_le_bytes());
     }

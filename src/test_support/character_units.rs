@@ -1,7 +1,8 @@
 //! Owned heaps only. No game process and no native function execution.
 use super::*;
-use eldenring::cs::{CSChrPhysicsModule, ChrCtrl, ChrIns, ChrInsModuleContainer};
-use std::mem::{offset_of, size_of};
+use crate::native_access::{CharacterAccess, offset as field_offset};
+use shikifsrs_elden_ring::storage_facts::{NativeStorageField as Field, *};
+use std::mem::size_of;
 use std::sync::Arc;
 
 pub(crate) const BASE: usize = 0x140000000;
@@ -36,11 +37,13 @@ impl Character {
         Self::in_heap(character_id, entity, native_scale, 0x10000)
     }
     pub fn in_heap(character_id: u32, entity: u32, native_scale: f32, bytes: usize) -> Self {
-        assert!(
-            size_of::<ChrIns>() < 0x2000
-                && size_of::<ChrCtrl>() < 0x2000
-                && size_of::<CSChrPhysicsModule>() < 0x2000
-        );
+        const {
+            assert!(
+                CHARACTER_SELECTED_EXTENT < 0x2000
+                    && CONTROLLER_SELECTED_EXTENT < 0x2000
+                    && PHYSICS_SELECTED_EXTENT < 0x2000
+            );
+        }
         assert!(bytes >= 0x10000 && bytes.is_multiple_of(16));
         let mut heap = vec![0u128; bytes / 16];
         for index in (0..heap.len()).step_by(4096 / 16) {
@@ -52,47 +55,47 @@ impl Character {
         };
         result.put(0, BASE + crate::cloth_owner_scope::ENEMY_VTABLE_RVA);
         result.put(
-            offset_of!(ChrIns, field_ins_handle),
+            field_offset(Field::CharacterIdentifier),
             entity as u64 + 0x100000000,
         );
-        result.put(offset_of!(ChrIns, character_id), character_id);
-        result.put(offset_of!(ChrIns, npc_param_id), 1234i32);
-        result.put(offset_of!(ChrIns, event_entity_id), entity);
-        result.put(offset_of!(ChrIns, chr_type), 5i32);
-        result.put(offset_of!(ChrIns, chr_set_entry), result.at(0xA000));
+        result.put(field_offset(Field::CharacterNumber), character_id);
+        result.put(field_offset(Field::CharacterNpcRequest), 1234i32);
+        result.put(field_offset(Field::CharacterStoredEvent), entity);
+        result.put(field_offset(Field::CharacterRawKind), 5i32);
+        result.put(field_offset(Field::CharacterEntry), result.at(0xA000));
         result.put(0xA000, result.address);
         result.put(0xA008, 4u8);
         result.put(0xA009, 4u8);
-        result.put(offset_of!(ChrIns, chr_ctrl), result.at(0x2000));
-        result.put(offset_of!(ChrIns, modules), result.at(0x8000));
-        result.put(offset_of!(ChrIns, special_effect), result.at(0x9000));
-        result.put(0x2000 + offset_of!(ChrCtrl, owner), result.address);
+        result.put(field_offset(Field::CharacterController), result.at(0x2000));
+        result.put(field_offset(Field::CharacterModules), result.at(0x8000));
+        result.put(field_offset(Field::CharacterEffects), result.at(0x9000));
         result.put(
-            0x8000 + offset_of!(ChrInsModuleContainer, physics),
-            result.at(0x6000),
-        );
-        result.put(
-            0x6000 + offset_of!(CSChrPhysicsModule, owner),
+            0x2000 + field_offset(Field::ControllerOwner),
             result.address,
         );
+        result.put(
+            0x8000 + field_offset(Field::ModulesPhysics),
+            result.at(0x6000),
+        );
+        result.put(0x6000 + field_offset(Field::PhysicsOwner), result.address);
         result.put(0x9010, result.address);
         for offset in [
-            offset_of!(ChrCtrl, scale_size_x),
-            offset_of!(ChrCtrl, scale_size_y),
-            offset_of!(ChrCtrl, scale_size_z),
+            field_offset(Field::ControllerScaleX),
+            field_offset(Field::ControllerScaleY),
+            field_offset(Field::ControllerScaleZ),
         ] {
             result.put(0x2000 + offset, native_scale);
         }
         for offset in [
-            offset_of!(CSChrPhysicsModule, chr_hit_height),
-            offset_of!(CSChrPhysicsModule, chr_hit_radius),
-            offset_of!(CSChrPhysicsModule, hit_height),
-            offset_of!(CSChrPhysicsModule, hit_radius),
-            offset_of!(CSChrPhysicsModule, weight),
+            field_offset(Field::PhysicsCharacterHeight),
+            field_offset(Field::PhysicsCharacterRadius),
+            field_offset(Field::PhysicsMapHeight),
+            field_offset(Field::PhysicsMapRadius),
+            field_offset(Field::PhysicsWeight),
         ] {
             result.put(0x6000 + offset, 4.0f32);
         }
-        result.put(offset_of!(ChrIns, chr_model_ins), result.at(0xD000));
+        result.put(field_offset(Field::CharacterModel), result.at(0xD000));
         result.put(
             0xD000,
             BASE + crate::cloth_owner_scope::CHARACTER_MODEL_VTABLE_RVA,
@@ -165,7 +168,7 @@ fn non_c0000_units_keep_native_baselines_and_dispatch_separate_pose_outputs() {
         with_unit_state(&states[i], || {
             assert_eq!(
                 crate::apply_character_scale(
-                    unsafe { &mut *(chars[i].address as *mut ChrIns) },
+                    &mut CharacterAccess::at(chars[i].address),
                     &mut runtime_states[i],
                     scales[i]
                 ),
@@ -178,7 +181,7 @@ fn non_c0000_units_keep_native_baselines_and_dispatch_separate_pose_outputs() {
         for i in 0..3 {
             with_unit_state(&states[i], || {
                 crate::apply_character_scale(
-                    unsafe { &mut *(chars[i].address as *mut ChrIns) },
+                    &mut CharacterAccess::at(chars[i].address),
                     &mut runtime_states[i],
                     scales[i],
                 );
@@ -191,11 +194,11 @@ fn non_c0000_units_keep_native_baselines_and_dispatch_separate_pose_outputs() {
             );
             assert_eq!(chars[i].get::<f32>(0xB200), 2.0 * scales[i]);
             assert_eq!(
-                chars[i].get::<f32>(0x2000 + offset_of!(ChrCtrl, scale_size_x)),
+                chars[i].get::<f32>(0x2000 + field_offset(Field::ControllerScaleX)),
                 [2.0, 1.0, 1.25][i] * scales[i]
             );
             assert_eq!(
-                chars[i].get::<f32>(0x6000 + offset_of!(CSChrPhysicsModule, hit_height)),
+                chars[i].get::<f32>(0x6000 + field_offset(Field::PhysicsMapHeight)),
                 4.0 * scales[i]
             );
         }
@@ -211,7 +214,7 @@ fn non_c0000_units_keep_native_baselines_and_dispatch_separate_pose_outputs() {
     for i in 0..3 {
         with_unit_state(&states[i], || {
             crate::apply_character_scale(
-                unsafe { &mut *(chars[i].address as *mut ChrIns) },
+                &mut CharacterAccess::at(chars[i].address),
                 &mut runtime_states[i],
                 1.0,
             );
@@ -219,7 +222,7 @@ fn non_c0000_units_keep_native_baselines_and_dispatch_separate_pose_outputs() {
         });
         assert_eq!(chars[i].get::<f32>(0xB200), 2.0);
         assert_eq!(
-            chars[i].get::<f32>(0x6000 + offset_of!(CSChrPhysicsModule, hit_height)),
+            chars[i].get::<f32>(0x6000 + field_offset(Field::PhysicsMapHeight)),
             4.0
         );
         unregister_unit(&states[i]);
@@ -262,7 +265,7 @@ fn non_c0000_cloth_reaches_the_253_rotation_fix_and_rejects_recycled_identity() 
             chr.at(0xE400),
         );
     });
-    chr.put(offset_of!(ChrIns, field_ins_handle), 999u64);
+    chr.put(field_offset(Field::CharacterIdentifier), 999u64);
     assert_eq!(with_collider_unit(chr.at(0xDD00), current_scale), 1.0);
     unregister_unit(&state);
 }
@@ -289,7 +292,7 @@ fn configured_small_and_large_scales_reach_body_collision_and_cached_pose() {
             with_unit_state(&hooks, || {
                 assert_eq!(
                     crate::apply_character_scale(
-                        unsafe { &mut *(actor.address as *mut ChrIns) },
+                        &mut CharacterAccess::at(actor.address),
                         &mut state,
                         selected.scale
                     ),
@@ -308,15 +311,15 @@ fn configured_small_and_large_scales_reach_body_collision_and_cached_pose() {
                 );
             }
             assert_eq!(
-                actor.get::<f32>(0x2000 + offset_of!(ChrCtrl, scale_size_x)),
+                actor.get::<f32>(0x2000 + field_offset(Field::ControllerScaleX)),
                 2.0 * scale
             );
             assert_eq!(
-                actor.get::<f32>(0x6000 + offset_of!(CSChrPhysicsModule, hit_height)),
+                actor.get::<f32>(0x6000 + field_offset(Field::PhysicsMapHeight)),
                 4.0 * scale
             );
             assert_eq!(
-                actor.get::<f32>(0x6000 + offset_of!(CSChrPhysicsModule, weight)),
+                actor.get::<f32>(0x6000 + field_offset(Field::PhysicsWeight)),
                 4.0
             );
         }
@@ -324,7 +327,7 @@ fn configured_small_and_large_scales_reach_body_collision_and_cached_pose() {
         with_unit_state(&hooks, || {
             assert_eq!(
                 crate::apply_character_scale(
-                    unsafe { &mut *(actor.address as *mut ChrIns) },
+                    &mut CharacterAccess::at(actor.address),
                     &mut state,
                     f32::MAX
                 ),
@@ -333,11 +336,11 @@ fn configured_small_and_large_scales_reach_body_collision_and_cached_pose() {
             assert_eq!(current_scale(), 1.0);
         });
         assert_eq!(
-            actor.get::<f32>(0x2000 + offset_of!(ChrCtrl, scale_size_x)),
+            actor.get::<f32>(0x2000 + field_offset(Field::ControllerScaleX)),
             2.0
         );
         assert_eq!(
-            actor.get::<f32>(0x6000 + offset_of!(CSChrPhysicsModule, hit_height)),
+            actor.get::<f32>(0x6000 + field_offset(Field::PhysicsMapHeight)),
             4.0
         );
         unregister_unit(&hooks);

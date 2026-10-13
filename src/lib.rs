@@ -37,12 +37,32 @@ mod ragdoll_shape_scale;
 mod scale_math;
 mod unit_runtime;
 
-use eldenring::{
-    cs::{CSTaskGroupIndex, CSTaskImp, ChrIns, PlayerIns, WorldChrMan},
-    fd4::FD4TaskData,
-    util::system::SystemInitError,
+use native_access::{CharacterAccess, WorldAccess};
+use shikifsrs_elden_ring::{
+    TaskCallback, Ww171File, current_tasks::CurrentTaskEngine,
+    task_resident::ResidentCallbackGroupSlot,
 };
-use fromsoftware_shared::{FromStatic, SharedTaskImpExt};
+use shikifsrs_runtime::memory::CurrentProcess;
+use std::sync::Arc;
+mod native_access;
+static SCALE_TASK: ResidentCallbackGroupSlot<1> = ResidentCallbackGroupSlot::new();
+#[derive(Debug)]
+enum TaskLookupError {
+    NotReady,
+    #[cfg(test)]
+    Timeout,
+    Rejected(String),
+}
+impl std::fmt::Display for TaskLookupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotReady => f.write_str("not ready"),
+            #[cfg(test)]
+            Self::Timeout => f.write_str("timeout"),
+            Self::Rejected(s) => f.write_str(s),
+        }
+    }
+}
 
 const DLL_PROCESS_DETACH: u32 = 0;
 const DLL_PROCESS_ATTACH: u32 = 1;
@@ -74,8 +94,7 @@ const ENABLE_DETAILED_CLOTH_CHILD_LOGGING: bool = false;
 
 static STARTED: AtomicBool = AtomicBool::new(false);
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
-// Loaders that start the DLL early (me3) can reach the task system lookup before
-// the CSTask singleton is registered; fromsoftware-rs then reports InvalidRva.
+// Early DLL loaders can reach task lookup before the native registry is ready.
 const STARTUP_RETRY_LIMIT: Duration = Duration::from_secs(120);
 const STARTUP_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -298,59 +317,51 @@ impl ScaleState {
     }
 }
 
-impl PhysicsBaseline {
-    fn capture(physics: &eldenring::cs::CSChrPhysicsModule) -> Self {
-        Self {
-            chr_hit_height: physics.chr_hit_height,
-            chr_hit_radius: physics.chr_hit_radius,
-            hit_height: physics.hit_height,
-            hit_radius: physics.hit_radius,
-            weight: physics.weight,
-        }
-    }
-}
-
 /// # Safety
 /// Exposed for Windows LoadLibrary. Do not call directly.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn DllMain(hmodule: usize, reason: u32) -> bool {
+pub unsafe extern "system" fn DllMain(
+    hmodule: usize,
+    reason: u32,
+    _reserved: *mut std::ffi::c_void,
+) -> windows::core::BOOL {
     match reason {
         DLL_PROCESS_ATTACH => {
             SHUTDOWN.store(false, Ordering::Release);
             if STARTED.swap(true, Ordering::AcqRel) {
-                return true;
+                return windows::core::BOOL(1);
             }
 
             std::thread::spawn(move || run_task_thread(hmodule));
-            true
+            windows::core::BOOL(1)
         }
         DLL_PROCESS_DETACH => {
             SHUTDOWN.store(true, Ordering::Release);
             log::line(format_args!("dll detach requested"));
-            true
+            windows::core::BOOL(1)
         }
-        _ => true,
+        _ => windows::core::BOOL(1),
     }
 }
 
-/// Calls `attempt` until it returns something other than `InvalidRva`, pausing
+/// Calls `attempt` until it returns something other than `NotReady`, pausing
 /// between tries while `keep_waiting` accepts the elapsed time. Returns the last
-/// result and the number of `InvalidRva` results that were retried.
+/// result and the number of `NotReady` results that were retried.
 fn retry_while_unregistered<T>(
-    mut attempt: impl FnMut() -> Result<T, SystemInitError>,
+    mut attempt: impl FnMut() -> Result<T, TaskLookupError>,
     mut keep_waiting: impl FnMut(Duration) -> bool,
     mut pause: impl FnMut(),
-) -> (Result<T, SystemInitError>, u32) {
+) -> (Result<T, TaskLookupError>, u32) {
     let started = Instant::now();
     let mut retries = 0u32;
     loop {
         match attempt() {
-            Err(SystemInitError::InvalidRva) if keep_waiting(started.elapsed()) => {
+            Err(TaskLookupError::NotReady) if keep_waiting(started.elapsed()) => {
                 pause();
                 // Shutdown or the deadline may have been reached during sleep.
                 // Do not perform (or count) another lookup after that boundary.
                 if !keep_waiting(started.elapsed()) {
-                    return (Err(SystemInitError::InvalidRva), retries);
+                    return (Err(TaskLookupError::NotReady), retries);
                 }
                 retries = retries.saturating_add(1);
             }
@@ -415,6 +426,40 @@ fn run_task_thread(hmodule: usize) {
         ));
         return;
     }
+    let bytes: Arc<[u8]> = match std::env::current_exe().and_then(std::fs::read) {
+        Ok(bytes) => bytes.into(),
+        Err(error) => {
+            log::line(format_args!("[ERCS] file unavailable: {error}"));
+            return;
+        }
+    };
+    let file = match Ww171File::verify(&bytes) {
+        Ok(file) => file,
+        Err(error) => {
+            log::line(format_args!("[ERCS] exact WW gate rejected: {error}"));
+            return;
+        }
+    };
+    let phase = match file.phase("ChrIns_PrePhysics") {
+        Ok(phase) => phase,
+        Err(error) => {
+            log::line(format_args!("[ERCS] phase rejected: {error}"));
+            return;
+        }
+    };
+    let mut pinned = windows::Win32::Foundation::HMODULE::default();
+    // SAFETY: FROM_ADDRESS receives this DLL's live function address; PIN keeps all
+    // owned hook code resident, including startup paths that later reject task setup.
+    if let Err(error) = unsafe {
+        windows::Win32::System::LibraryLoader::GetModuleHandleExW(
+            0x5,
+            windows::core::PCWSTR(run_task_thread as *const () as *const u16),
+            &mut pinned,
+        )
+    } {
+        log::line(format_args!("[ERCS] DLL pin failed: {error}"));
+        return;
+    }
     let hook_started = Instant::now();
     equipment_retarget_native::initialize(config.retarget.clone());
     let body_scale_hooks_ready = body_scale_port::install();
@@ -427,11 +472,11 @@ fn run_task_thread(hmodule: usize) {
     log::line(format_args!(
         "[player-scale-no-bone] ER body-scale port install_ready={body_scale_hooks_ready}"
     ));
-    // Never reach fsrs lazy version detection or task registration after a
+    // Never reach SDK task registration or task registration after a
     // rejected executable/hook layout (including unsupported future updates).
     if !body_scale_hooks_ready {
         log::line(format_args!(
-            "[player-scale-no-bone] runtime rejected; no upstream task access"
+            "[player-scale-no-bone] runtime rejected; no SDK task access"
         ));
         return;
     }
@@ -453,11 +498,33 @@ fn run_task_thread(hmodule: usize) {
     }
 
     log::line(format_args!(
-        "[player-scale-no-bone] waiting for upstream ER 2.7 task system"
+        "[player-scale-no-bone] waiting for ShikiFSRS current task system"
     ));
     let task_wait_started = Instant::now();
     let (task_lookup, task_retries) = retry_while_unregistered(
-        || CSTaskImp::wait_for_instance(Duration::MAX),
+        || {
+            let catalog = file
+                .bind(&CurrentProcess, body_scale_port::image_base() as u64)
+                .map_err(|e| TaskLookupError::Rejected(e.to_string()))?;
+            let id = catalog
+                .observe_phase(phase)
+                .map_err(|e| TaskLookupError::Rejected(e.to_string()))?
+                .and_then(|v| v.native_group_id())
+                .ok_or(TaskLookupError::NotReady)?;
+            if catalog
+                .registered_group(id, 4096)
+                .map_err(|e| TaskLookupError::Rejected(e.to_string()))?
+                .is_none()
+            {
+                return Err(TaskLookupError::NotReady);
+            }
+            // SAFETY: Exact file and task guards, retained process module/heap; serialized
+            // registration remains experimental and must be established by the runtime host.
+            unsafe {
+                CurrentTaskEngine::bind(Arc::clone(&bytes), body_scale_port::image_base() as u64)
+            }
+            .map_err(|e| TaskLookupError::Rejected(e.to_string()))
+        },
         |elapsed| !SHUTDOWN.load(Ordering::Acquire) && elapsed < STARTUP_RETRY_LIMIT,
         || std::thread::sleep(STARTUP_RETRY_INTERVAL),
     );
@@ -465,7 +532,7 @@ fn run_task_thread(hmodule: usize) {
         Ok(cs_task) => cs_task,
         Err(reason) => {
             log::line(format_args!(
-                "[player-scale-no-bone] failed to find upstream ER 2.7 task system after {task_retries} retries: {reason}"
+                "[player-scale-no-bone] failed to find ShikiFSRS current task system after {task_retries} retries: {reason}"
             ));
             STARTED.store(false, Ordering::Release);
             return;
@@ -475,11 +542,11 @@ fn run_task_thread(hmodule: usize) {
 
     if task_retries > 0 {
         log::line(format_args!(
-            "[player-scale-no-bone] upstream ER 2.7 task system ready after {task_retries} retries"
+            "[player-scale-no-bone] ShikiFSRS current task system ready after {task_retries} retries"
         ));
     }
     log::line(format_args!(
-        "[player-scale-no-bone] upstream ER 2.7 task system ready; registering scale task"
+        "[player-scale-no-bone] ShikiFSRS current task system ready; registering scale task"
     ));
     log::line(format_args!(
         "[player-scale-no-bone] build_mode={BUILD_MODE} task_group=ChrIns_PrePhysics body_scale_hooks_ready={body_scale_hooks_ready} scale_collision={SCALE_COLLISION} scale_weight={SCALE_WEIGHT} scale_hknp_capsule={SCALE_HKNP_CAPSULE_SHAPE} scale_aabb_identity_matrix={SCALE_AABB_IDENTITY_MATRIX_BUFFER} scale_ragdoll_body_cinfo_capsules={SCALE_RAGDOLL_BODY_CINFO_CAPSULES} scale_ragdoll_live_motion_coms={SCALE_RAGDOLL_LIVE_MOTION_COMS} heavy_havok_probe={HAVOK_PROBE_ENABLED} hkx_collidable_probe={HKX_COLLIDABLE_PROBE_ENABLED} ragdoll_single_probe={RAGDOLL_SINGLE_PROBE_ENABLED} ragdoll_live_probe={RAGDOLL_LIVE_PROBE_ENABLED}"
@@ -493,32 +560,53 @@ fn run_task_thread(hmodule: usize) {
 
     let mut state = ScaleState::default();
     let mut units = unit_runtime::Runtime::new(config, body_scale_port::image_base());
-    cs_task.run_recurring(
-        move |_: &FD4TaskData| {
-            state.task_frames = state.task_frames.wrapping_add(1);
-            if state.task_frames == 1 {
-                log::line(format_args!(
-                    "[player-scale-no-bone] ER 2.7 scale task callback active"
-                ));
-            }
-            if SHUTDOWN.load(Ordering::Acquire) {
-                maybe_log_runtime_stage(&mut state, "shutdown");
-                units.clear();
-                state.reset();
-                return;
-            }
+    let base = body_scale_port::image_base();
+    let callback = TaskCallback::new(move |_| {
+        state.task_frames = state.task_frames.wrapping_add(1);
+        if state.task_frames == 1 {
+            log::line(format_args!(
+                "[player-scale-no-bone] ER 2.7 scale task callback active"
+            ));
+        }
+        if SHUTDOWN.load(Ordering::Acquire) {
+            maybe_log_runtime_stage(&mut state, "shutdown");
+            units.clear();
+            state.reset();
+            return;
+        }
 
-            let Ok(world_chr_man) = (unsafe { WorldChrMan::instance_mut() }) else {
-                maybe_log_runtime_stage(&mut state, "world-chr-man-unavailable");
-                units.suspend();
-                return;
-            };
+        let Some(world_address) = unit_runtime::read::<usize>(
+            base + shikifsrs_elden_ring::storage_facts::WORLD_CHARACTERS_GLOBAL as usize,
+        )
+        .filter(|p| *p != 0) else {
+            maybe_log_runtime_stage(&mut state, "world-chr-man-unavailable");
+            units.suspend();
+            return;
+        };
 
-            let stage = units.tick(world_chr_man, state.task_frames).stage();
-            maybe_log_runtime_stage(&mut state, stage);
+        let stage = units
+            .tick(
+                &WorldAccess {
+                    address: world_address,
+                },
+                state.task_frames,
+            )
+            .stage();
+        maybe_log_runtime_stage(&mut state, stage);
+    });
+    // SAFETY: Static process-resident owner retains the callback, SDK DLL and task receipt.
+    // The host must establish exclusive pre-physics graph/phase and registration authority;
+    // synthetic tests do not establish those experimental game-runtime obligations.
+    match unsafe { SCALE_TASK.install(cs_task, [phase], [callback]) } {
+        Ok(installed) => match installed.registration {
+            Ok(control) => log::line(format_args!(
+                "[ERCS] scale registration complete={}",
+                control.registered_all()
+            )),
+            Err(error) => log::line(format_args!("[ERCS] retained registration failed: {error}")),
         },
-        CSTaskGroupIndex::ChrIns_PrePhysics,
-    );
+        Err(error) => log::line(format_args!("[ERCS] registration rejected: {error}")),
+    }
 }
 
 fn maybe_log_runtime_stage(state: &mut ScaleState, stage: &'static str) {
@@ -550,13 +638,13 @@ fn run_nightreign_readonly_probe(exe_path: &str) {
     nr_probe::install_havok_runtime_root_probe();
 }
 
-fn apply_player_scale(player: &mut PlayerIns, state: &mut ScaleState, requested_scale: f32) -> f32 {
-    let applied_scale = apply_character_scale(&mut player.chr_ins, state, requested_scale);
-    equipment_retarget_native::refresh(
-        player as *mut PlayerIns as usize,
-        applied_scale,
-        state.task_frames,
-    );
+fn apply_player_scale(
+    player: &mut CharacterAccess,
+    state: &mut ScaleState,
+    requested_scale: f32,
+) -> f32 {
+    let applied_scale = apply_character_scale(player, state, requested_scale);
+    equipment_retarget_native::refresh(player.address, applied_scale, state.task_frames);
     if SCALE_HKNP_CAPSULE_SHAPE {
         havok_shape_scale::scale_player_hknp_capsule_shape(
             player,
@@ -597,9 +685,13 @@ fn apply_player_scale(player: &mut PlayerIns, state: &mut ScaleState, requested_
     applied_scale
 }
 
-fn apply_character_scale(chr: &mut ChrIns, state: &mut ScaleState, requested_scale: f32) -> f32 {
+fn apply_character_scale(
+    chr: &mut CharacterAccess,
+    state: &mut ScaleState,
+    requested_scale: f32,
+) -> f32 {
     let frame_started = Instant::now();
-    let player_addr = chr as *mut ChrIns as usize;
+    let player_addr = chr.address;
     if state.player_addr != Some(player_addr) {
         cloth_local_scale::restore_cloth_local_dimensions(&mut state.cloth_local_scale_state);
         cloth_instance_aabb_scale::clear_cloth_instance_aabb_state(
@@ -671,7 +763,7 @@ fn apply_character_scale(chr: &mut ChrIns, state: &mut ScaleState, requested_sca
     } else {
         1.0
     };
-    let chr_ins_addr = chr as *const ChrIns as usize;
+    let chr_ins_addr = chr.address;
     let bind_started = Instant::now();
     let bind_queries_before = memory_query::query_count();
     state.binding_audit_frames = state.binding_audit_frames.saturating_add(1);
@@ -1603,24 +1695,23 @@ fn maybe_log_matrix_candidates(target_anim_skeleton: usize, state: &mut ScaleSta
     }
 }
 
-fn character_scale_supported(chr: &mut ChrIns, state: &ScaleState, scale: f32) -> bool {
+fn character_scale_supported(chr: &mut CharacterAccess, state: &ScaleState, scale: f32) -> bool {
     if !scale_math::valid(scale) {
         return false;
     }
-    let ctrl = chr.chr_ctrl.as_mut();
-    let visual =
-        state
-            .visual_baseline
-            .unwrap_or([ctrl.scale_size_x, ctrl.scale_size_y, ctrl.scale_size_z]);
+    let Some(current_visual) = chr.scales() else {
+        return false;
+    };
+    let visual = state.visual_baseline.unwrap_or(current_visual);
     if !visual
         .iter()
         .all(|v| *v > 0.0 && scale_math::product(*v, scale).is_some())
     {
         return false;
     }
-    let physics = state
-        .baseline
-        .unwrap_or_else(|| PhysicsBaseline::capture(chr.modules.as_mut().physics.as_mut()));
+    let Some(physics) = state.baseline.or_else(|| chr.physics()) else {
+        return false;
+    };
     (!SCALE_COLLISION
         || [
             physics.chr_hit_height,
@@ -1633,37 +1724,37 @@ fn character_scale_supported(chr: &mut ChrIns, state: &ScaleState, scale: f32) -
         && (!SCALE_WEIGHT || scale_math::product(physics.weight, scale).is_some())
 }
 
-fn apply_visual_scale(chr: &mut ChrIns, state: &mut ScaleState, scale: f32) {
-    let chr_ctrl = chr.chr_ctrl.as_mut();
-    let baseline = *state.visual_baseline.get_or_insert([
-        chr_ctrl.scale_size_x,
-        chr_ctrl.scale_size_y,
-        chr_ctrl.scale_size_z,
-    ]);
-    chr_ctrl.scale_size_x = baseline[0] * scale;
-    chr_ctrl.scale_size_y = baseline[1] * scale;
-    chr_ctrl.scale_size_z = baseline[2] * scale;
-}
-
-fn apply_physics_scale(chr: &mut ChrIns, state: &mut ScaleState, scale: f32) {
-    let physics = chr.modules.as_mut().physics.as_mut();
-    let baseline = *state
-        .baseline
-        .get_or_insert_with(|| PhysicsBaseline::capture(physics));
-
-    physics.chr_hit_height = baseline.chr_hit_height * scale;
-    physics.chr_hit_radius = baseline.chr_hit_radius * scale;
-    physics.hit_height = baseline.hit_height * scale;
-    physics.hit_radius = baseline.hit_radius * scale;
-
-    physics.weight = if SCALE_WEIGHT {
-        (baseline.weight * scale).max(1.0)
-    } else {
-        baseline.weight
+fn apply_visual_scale(chr: &mut CharacterAccess, state: &mut ScaleState, scale: f32) {
+    let Some(current) = chr.scales() else {
+        return;
     };
+    let baseline = *state.visual_baseline.get_or_insert(current);
+    if !chr.write_scales(baseline.map(|v| v * scale)) {
+        log::line(format_args!("[ERCS-UNIT] selected visual store rejected"));
+    }
+}
+fn apply_physics_scale(chr: &mut CharacterAccess, state: &mut ScaleState, scale: f32) {
+    let Some(current) = chr.physics() else {
+        return;
+    };
+    let baseline = *state.baseline.get_or_insert(current);
+    let values = PhysicsBaseline {
+        chr_hit_height: baseline.chr_hit_height * scale,
+        chr_hit_radius: baseline.chr_hit_radius * scale,
+        hit_height: baseline.hit_height * scale,
+        hit_radius: baseline.hit_radius * scale,
+        weight: if SCALE_WEIGHT {
+            (baseline.weight * scale).max(1.0)
+        } else {
+            baseline.weight
+        },
+    };
+    if !chr.write_physics(values) {
+        log::line(format_args!("[ERCS-UNIT] selected physics store rejected"));
+    }
 }
 
-fn maybe_probe_havok(player: &mut PlayerIns, state: &mut ScaleState, scale: f32) {
+fn maybe_probe_havok(player: &mut CharacterAccess, state: &mut ScaleState, scale: f32) {
     if !HAVOK_PROBE_ENABLED || (scale - 1.0).abs() < f32::EPSILON {
         return;
     }
@@ -1688,7 +1779,7 @@ fn maybe_probe_havok(player: &mut PlayerIns, state: &mut ScaleState, scale: f32)
     havok_probe::probe_player_havok_roots(player, scale);
 }
 
-fn maybe_probe_hkx_collidables(player: &mut PlayerIns, state: &mut ScaleState, scale: f32) {
+fn maybe_probe_hkx_collidables(player: &mut CharacterAccess, state: &mut ScaleState, scale: f32) {
     if !HKX_COLLIDABLE_PROBE_ENABLED || (scale - 1.0).abs() < f32::EPSILON {
         return;
     }
@@ -1722,12 +1813,12 @@ fn maybe_probe_hkx_collidables(player: &mut PlayerIns, state: &mut ScaleState, s
     hkx_collidable_probe::probe_player_hkx_collidables(player, scale);
 }
 
-fn maybe_probe_ragdoll_single(player: &mut PlayerIns, state: &mut ScaleState, scale: f32) {
+fn maybe_probe_ragdoll_single(player: &mut CharacterAccess, state: &mut ScaleState, scale: f32) {
     if !RAGDOLL_SINGLE_PROBE_ENABLED {
         return;
     }
 
-    let player_addr = player as *mut PlayerIns as usize;
+    let player_addr = player.address;
     let chr_model_addr = read_chr_model_addr(player);
     let (_, ragdoll_addr) = read_chr_ctrl_hkx_roots(player);
     state.ragdoll_single_status_frames = state.ragdoll_single_status_frames.wrapping_add(1);
@@ -1760,12 +1851,12 @@ fn maybe_probe_ragdoll_single(player: &mut PlayerIns, state: &mut ScaleState, sc
     hkx_collidable_probe::probe_ragdoll_single_physics_system(player, scale);
 }
 
-fn maybe_probe_ragdoll_live(player: &mut PlayerIns, state: &mut ScaleState, scale: f32) {
+fn maybe_probe_ragdoll_live(player: &mut CharacterAccess, state: &mut ScaleState, scale: f32) {
     if !RAGDOLL_LIVE_PROBE_ENABLED {
         return;
     }
 
-    let player_addr = player as *mut PlayerIns as usize;
+    let player_addr = player.address;
     let chr_model_addr = read_chr_model_addr(player);
     let (_, ragdoll_addr) = read_chr_ctrl_hkx_roots(player);
     state.ragdoll_live_status_frames = state.ragdoll_live_status_frames.wrapping_add(1);
@@ -1864,14 +1955,13 @@ fn maybe_log_ragdoll_single_status(
     ));
 }
 
-fn read_chr_model_addr(player: &PlayerIns) -> usize {
-    let chr_ins_addr = &player.chr_ins as *const _ as usize;
+fn read_chr_model_addr(player: &CharacterAccess) -> usize {
+    let chr_ins_addr = player.address;
     unsafe { ((chr_ins_addr + CHR_INS_MODEL_INS_OFFSET) as *const usize).read_unaligned() }
 }
 
-fn read_chr_ctrl_hkx_roots(player: &mut PlayerIns) -> (usize, usize) {
-    let chr_ctrl = player.chr_ins.chr_ctrl.as_mut();
-    (chr_ctrl.chr_collision, chr_ctrl.ragdoll_ins)
+fn read_chr_ctrl_hkx_roots(player: &mut CharacterAccess) -> (usize, usize) {
+    (player.controller_storage(), player.ragdoll_address())
 }
 
 #[cfg(test)]
@@ -1900,7 +1990,7 @@ mod tests {
             || {
                 calls += 1;
                 if calls <= 3 {
-                    Err(SystemInitError::InvalidRva)
+                    Err(TaskLookupError::NotReady)
                 } else {
                     Ok(calls)
                 }
@@ -1919,12 +2009,12 @@ mod tests {
         let (result, retries) = retry_while_unregistered(
             || {
                 calls.set(calls.get() + 1);
-                Err::<(), _>(SystemInitError::InvalidRva)
+                Err::<(), _>(TaskLookupError::NotReady)
             },
             |_| calls.get() <= 2,
             || {},
         );
-        assert!(matches!(result, Err(SystemInitError::InvalidRva)));
+        assert!(matches!(result, Err(TaskLookupError::NotReady)));
         assert_eq!(retries, 2);
         assert_eq!(calls.get(), 3);
     }
@@ -1935,12 +2025,12 @@ mod tests {
         let (result, retries) = retry_while_unregistered(
             || {
                 calls += 1;
-                Err::<(), _>(SystemInitError::Timeout)
+                Err::<(), _>(TaskLookupError::Timeout)
             },
             |_| true,
             || {},
         );
-        assert!(matches!(result, Err(SystemInitError::Timeout)));
+        assert!(matches!(result, Err(TaskLookupError::Timeout)));
         assert_eq!(retries, 0);
         assert_eq!(calls, 1);
     }
@@ -1963,7 +2053,7 @@ mod tests {
             || {
                 calls += 1;
                 if calls == 1 {
-                    Err(SystemInitError::InvalidRva)
+                    Err(TaskLookupError::NotReady)
                 } else {
                     Ok(7)
                 }
@@ -1974,7 +2064,7 @@ mod tests {
                 waiting.set(false);
             },
         );
-        assert!(matches!(result, Err(SystemInitError::InvalidRva)));
+        assert!(matches!(result, Err(TaskLookupError::NotReady)));
         assert_eq!(calls, 1, "stop conditions must prevent the next lookup");
         assert_eq!(retries, 0);
         assert_eq!(pauses, 1);

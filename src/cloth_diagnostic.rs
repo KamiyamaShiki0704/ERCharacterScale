@@ -733,7 +733,7 @@ impl Session {
         }
         // At most ONE pair per task frame across all native hooks/threads.
         self.frame_budget
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
                 if n >> 8 > frame {
                     return None;
                 }
@@ -742,7 +742,7 @@ impl Session {
             })
             .ok()?;
         self.counts[key]
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
                 (n < PER_STAGE).then_some(n + 1)
             })
             .ok()?;

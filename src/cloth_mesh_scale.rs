@@ -61,8 +61,8 @@ pub fn restore_normal_length(
         return None;
     }
     for row in bytes.chunks_exact(stride) {
-        for value in row[..12].chunks_exact(4) {
-            let value = f32::from_le_bytes(value.try_into().ok()?);
+        for value in row[..12].as_chunks::<4>().0.iter() {
+            let value = f32::from_le_bytes(*value);
             if !crate::scale_math::representable(value, value / scale) {
                 return None;
             }
@@ -72,8 +72,8 @@ pub fn restore_normal_length(
         return Some(0);
     }
     for row in bytes.chunks_exact_mut(stride) {
-        for value in row[..12].chunks_exact_mut(4) {
-            let n = f32::from_le_bytes((&*value).try_into().ok()?) / scale;
+        for value in row[..12].as_chunks_mut::<4>().0.iter_mut() {
+            let n = f32::from_le_bytes(*value) / scale;
             value.copy_from_slice(&n.to_le_bytes());
         }
     }

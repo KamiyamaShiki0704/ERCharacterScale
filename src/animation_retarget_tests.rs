@@ -148,8 +148,10 @@ fn actual_source_sk_and_target_reference_make_runtime_plan() {
         for name in ["a000_000000", "a000_002000", "a000_003000"] {
             let indices = std::fs::read(directory.join(format!("{name}.indices"))).unwrap();
             let indices: Vec<_> = indices
-                .chunks_exact(2)
-                .map(|b| i16::from_le_bytes(b.try_into().unwrap()))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|b| i16::from_le_bytes(*b))
                 .collect();
             let poses = std::fs::read(directory.join(format!("{name}.poses"))).unwrap();
             let expected = std::fs::read(directory.join(format!("{name}.result"))).unwrap();
@@ -355,9 +357,9 @@ fn native_interpolated_samples_normalize_before_retargeting() {
     let mut interpolated = canonical.clone();
     // Native samples captured before Havok normalization have norm^2 down to
     // 0.9288. A finite nonzero quaternion represents the same rotation.
-    for q in interpolated.chunks_exact_mut(48) {
-        for component in q[16..32].chunks_exact_mut(4) {
-            let v = f32::from_le_bytes(component.try_into().unwrap()) * 0.964;
+    for q in interpolated.as_chunks_mut::<48>().0.iter_mut() {
+        for component in q[16..32].as_chunks_mut::<4>().0.iter_mut() {
+            let v = f32::from_le_bytes(*component) * 0.964;
             component.copy_from_slice(&v.to_le_bytes());
         }
         assert!(
@@ -374,7 +376,7 @@ fn native_interpolated_samples_normalize_before_retargeting() {
     }
     for bad in [0.0f32, f32::NAN, f32::INFINITY] {
         let mut raw = canonical.clone();
-        for part in raw[16..32].chunks_exact_mut(4) {
+        for part in raw[16..32].as_chunks_mut::<4>().0.iter_mut() {
             part.copy_from_slice(&bad.to_le_bytes());
         }
         assert!(p.prepare(&raw).is_none());

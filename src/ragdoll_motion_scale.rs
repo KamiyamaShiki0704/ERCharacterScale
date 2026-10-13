@@ -1,4 +1,4 @@
-use eldenring::cs::PlayerIns;
+use crate::native_access::CharacterAccess;
 use windows::Win32::System::Memory::{
     MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY,
     PAGE_GUARD, PAGE_NOACCESS, PAGE_READWRITE, PAGE_WRITECOPY, VirtualQuery,
@@ -30,7 +30,7 @@ struct RagdollMotionBaseline {
 }
 
 pub fn scale_player_ragdoll_motion_coms(
-    player: &mut PlayerIns,
+    player: &mut CharacterAccess,
     state: &mut RagdollMotionScaleState,
     scale: f32,
 ) {
@@ -91,8 +91,8 @@ pub fn scale_player_ragdoll_motion_coms(
     }
 }
 
-fn find_candidate(player: &mut PlayerIns) -> Option<Candidate> {
-    let ragdoll_addr = player.chr_ins.chr_ctrl.as_mut().ragdoll_ins;
+fn find_candidate(player: &mut CharacterAccess) -> Option<Candidate> {
+    let ragdoll_addr = player.ragdoll_address();
     let live_root = read_usize(ragdoll_addr + RAGDOLL_LIVE_MOTION_ROOT_OFFSET)?;
     let array_a = read_hk_array(live_root + LIVE_MOTION_ARRAY_A_OFFSET)?;
     let array_b = read_hk_array(live_root + LIVE_MOTION_ARRAY_B_OFFSET)?;

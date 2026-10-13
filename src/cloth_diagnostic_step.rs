@@ -1245,8 +1245,8 @@ mod tests {
             .set(Instant::now() - Duration::from_millis(START_MS))
             .unwrap();
         assert!(eligible(&session));
-        for index in 0..STEPS {
-            let mut slot = session.ordered.slots[index].lock().unwrap();
+        for (index, slot) in session.ordered.slots.iter().enumerate().take(STEPS) {
+            let mut slot = slot.lock().unwrap();
             let s = slot.as_mut().unwrap();
             assert!(s.mesh.source.is_none());
             s.mesh.source = Some(MeshBoundarySource {
