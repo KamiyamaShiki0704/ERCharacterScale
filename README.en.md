@@ -66,7 +66,7 @@ cd ERCharacterScale
 cargo build --release --locked
 ```
 
-The output is `target/x86_64-pc-windows-msvc/release/ERCharacterScale.dll`. The repository configures static C/C++ runtime linking. Cargo fetches `fromsoftware-rs` from Git at a pinned commit. This repository contains neither its source tree nor a Git submodule. `Cargo.lock` pins dependency resolution.
+The output is `target/x86_64-pc-windows-msvc/release/ERCharacterScale.dll`. The repository configures static C/C++ runtime linking. Cargo fetches `ShikiFSRS` from Git at a pinned commit. This repository contains neither its source tree nor a Git submodule. `Cargo.lock` pins dependency resolution.
 
 See [Validation](docs/VALIDATION.md) for development checks and test commands.
 

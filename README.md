@@ -66,16 +66,10 @@ cd ERCharacterScale
 cargo build --release --locked
 ```
 
-输出为 `target/x86_64-pc-windows-msvc/release/ERCharacterScale.dll`。仓库已配置静态 C/C++ 运行库链接。Cargo 从 Git 获取 `fromsoftware-rs`，通过 Cargo 固定到指定提交；仓库不包含该依赖源码或 Git 子模块。`Cargo.lock` 固定依赖解析结果。
+输出为 `target/x86_64-pc-windows-msvc/release/ERCharacterScale.dll`。仓库已配置静态 C/C++ 运行库链接。Cargo 从 Git 获取 `ShikiFSRS`，通过 Cargo 固定到指定提交；仓库不包含该依赖源码或 Git 子模块。`Cargo.lock` 固定依赖解析结果。
 
 开发与自动检查入口见 [验证说明](docs/VALIDATION.md)。
 
 ## License
 
 本项目使用 [MIT License](LICENSE)。依赖和参考代码的许可证及署名见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
-## Building with ShikiFSRS
-
-Cargo pins `KamiyamaShiki0704/ShikiFSRS` to `fb9f4524da1fb648e0a696f2d47aa08d3acf35cc`. `.cargo/config.toml` enables Git CLI fetching; no token is stored in this repository.
-
-The migration was checked offline against ER WW 1.17.1 (EXE 2.7.1.0). Native engine ownership, phase/lifetime requirements and unexecuted gameplay behavior remain experimental and require manual acceptance. Existing ignored game/asset fixtures were not executed.
