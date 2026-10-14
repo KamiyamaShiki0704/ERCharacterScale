@@ -657,17 +657,96 @@ impl Drop for NativeTest {
     }
 }
 
-#[test]
-fn actual_weapon_dummy_route_follows_target_hand_and_rejects_a_rebuilt_record() {
-    let mut fixture = NativeTest::new();
-    refresh(fixture.character.address, 1.0, 1);
-    {
-        let mut sessions = REGISTRY.write().unwrap();
-        Arc::get_mut(&mut sessions[0]).unwrap().motion = Some(MotionProfile {
+// Independent equipped objects and mappers; only their authored body skeleton
+// is shared, as with a matching HD/BD/AM/LG set. No native cloth is needed.
+fn add_matching_part(fixture: &mut NativeTest, slot_index: usize) -> usize {
+    let original = ptr(fixture.slot).unwrap();
+    let original_item = ptr(original + 0x10).unwrap();
+    let original_resource = ptr(original_item + 0x68).unwrap();
+    let original_exporter = ptr(original_item + 0x658).unwrap();
+    let h = &mut fixture._heap;
+    let equipment = h.alloc(0x200);
+    let item = h.alloc(0x800);
+    let resource = h.alloc(0x600);
+    let exporter = h.alloc(0x180);
+    let mapper = h.alloc(0xa0);
+    let holder = h.alloc(8);
+    let inverse = h.alloc(4 * 48);
+    for (from, to, size) in [
+        (original, equipment, 0x200),
+        (original_item, item, 0x800),
+        (original_resource, resource, 0x600),
+        (original_exporter, exporter, 0x180),
+        (fixture.mapper, mapper, 0xa0),
+        (ptr(original_resource + 0x2f8).unwrap(), inverse, 4 * 48),
+    ] {
+        unsafe {
+            std::ptr::copy_nonoverlapping(from as *const u8, to as *mut u8, size);
+        }
+    }
+    h.put(fixture.slot + slot_index * 8, equipment);
+    h.put(equipment + 0x10, item);
+    h.put(equipment + 0x130, 0usize);
+    h.put(item + 0x68, resource);
+    h.put(item + 0x658, exporter);
+    h.put(resource + 0x2f8, inverse);
+    h.put(exporter + 0x100, resource);
+    h.put(exporter + 0x50, holder);
+    h.put(exporter + 0x70, holder);
+    h.put(holder, mapper);
+    resource
+}
+
+fn test_body_profiles() {
+    for session in REGISTRY.write().unwrap().iter_mut() {
+        Arc::get_mut(session).unwrap().motion = Some(MotionProfile {
             leg_ratio: 0.8,
             height_ratio: 0.8,
         });
     }
+}
+
+#[test]
+fn actual_weapon_dummy_route_follows_target_hand_and_rejects_a_rebuilt_record() {
+    weapon_dummy_case(1);
+}
+
+#[test]
+fn multipart_weapon_dummy_follows_target_hand_once() {
+    weapon_dummy_case(4);
+}
+
+#[test]
+fn multipart_attachment_profiles_reject_different_body_at_the_same_motion_ratio() {
+    let mut fixture = NativeTest::new();
+    add_matching_part(&mut fixture, 1);
+    let different = add_matching_part(&mut fixture, 2);
+    let inverse = ptr(different + 0x2f8).unwrap();
+    fixture._heap.put(
+        inverse + 2 * 48,
+        pose::affine_output(DMat4::from_translation(DVec3::X * -1.5)).unwrap(),
+    );
+    refresh(fixture.character.address, 1.0, 1);
+    test_body_profiles();
+    let sessions = REGISTRY.read().unwrap();
+    assert_eq!(sessions.len(), 3);
+    let selected = profile::attachment_sessions(&sessions);
+    assert_eq!(selected.len(), 2, "different arm references were merged");
+    let mut reversed = sessions.clone();
+    reversed.reverse();
+    let reordered = profile::attachment_sessions(&reversed);
+    assert!(Arc::ptr_eq(selected[0], reordered[0]));
+    assert!(Arc::ptr_eq(selected[1], reordered[1]));
+}
+
+fn weapon_dummy_case(parts: usize) {
+    let mut fixture = NativeTest::new();
+    for i in 1..parts {
+        add_matching_part(&mut fixture, i);
+    }
+    refresh(fixture.character.address, 1.0, 1);
+    assert_eq!(REGISTRY.read().unwrap().len(), parts);
+    test_body_profiles();
     let h = &mut fixture._heap;
     let eq = h.alloc(0x180);
     let item = h.alloc(0x800);
@@ -751,6 +830,15 @@ fn actual_weapon_dummy_route_follows_target_hand_and_rejects_a_rebuilt_record() 
             "weapon stayed at original hand: {out:?}"
         );
         assert_eq!([out[0], out[5], out[10]], [1.0; 3]);
+    }
+    if parts > 1 {
+        fixture._heap.put(fixture.slot, 0usize);
+        refresh(fixture.character.address, 1.0, 2);
+        attachments::hook(&mut registers, original as *const () as usize);
+        assert!(
+            (out[12] - 2.1).abs() < 1e-5,
+            "remaining equipment did not take over the grip"
+        );
     }
     fixture._heap.put(record + 4, 0i32);
     attachments::hook(&mut registers, original as *const () as usize);
@@ -1234,7 +1322,19 @@ fn overall_scale_conventions_remain_coherent_across_switches_and_suspend_revokes
 
 #[test]
 fn body_dummy_batches_follow_local_body_without_weapons_and_revoke_stale_records() {
+    body_dummy_case(1);
+}
+
+#[test]
+fn multipart_body_dummy_batches_and_nested_weapon_selectors_align_once() {
+    body_dummy_case(4);
+}
+
+fn body_dummy_case(parts: usize) {
     let mut fixture = NativeTest::new();
+    for i in 1..parts {
+        add_matching_part(&mut fixture, i);
+    }
     let h = &mut fixture._heap;
     let model = h.alloc(0x80);
     let item = h.alloc(0x680);
@@ -1307,12 +1407,8 @@ fn body_dummy_batches_follow_local_body_without_weapons_and_revoke_stale_records
     }
     h.put(bones + 3 * 64 + 0x2c, -1i16);
     refresh(fixture.character.address, 1.0, 1);
-    Arc::get_mut(&mut REGISTRY.write().unwrap()[0])
-        .unwrap()
-        .motion = Some(MotionProfile {
-        leg_ratio: 0.8,
-        height_ratio: 0.8,
-    });
+    assert_eq!(REGISTRY.read().unwrap().len(), parts);
+    test_body_profiles();
     dummies::refresh(&REGISTRY.read().unwrap(), TEST_BASE);
     unsafe extern "C" fn original(_: usize, out: usize, record: usize) -> usize {
         let index = unsafe { ((record + 4) as *const i32).read_unaligned() } as usize;
@@ -1455,6 +1551,15 @@ fn body_dummy_batches_follow_local_body_without_weapons_and_revoke_stale_records
     r.r8 = (records + 160) as u64;
     dummies::hook(&mut r, original as *const () as usize);
     assert!((out[12] - 1.1).abs() < 1e-5);
+    if parts > 1 {
+        h.put(fixture.slot, 0usize);
+        refresh(fixture.character.address, 1.0, 2);
+        dummies::hook(&mut r, original as *const () as usize);
+        assert!(
+            (out[12] - 1.1).abs() < 1e-5,
+            "remaining equipment did not take over body dummies"
+        );
+    }
     h.put(wrapper + 8, 0usize);
     r.r8 = (records + 160) as u64;
     dummies::hook(&mut r, original as *const () as usize);

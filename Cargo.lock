@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "player-scale-no-bone"
-version = "2.55.5"
+version = "2.55.6"
 dependencies = [
  "flate2",
  "glam",

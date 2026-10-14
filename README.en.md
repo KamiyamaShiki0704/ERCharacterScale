@@ -4,7 +4,7 @@
 
 Configure the overall size of the Elden Ring player and other characters through TOML rules. Apply a scale while a SpEffect is active, or use a constant scale without any effect requirement.
 
-[Download v2.55.5](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.5) · [Configuration guide (Chinese)](docs/CONFIGURATION.md) · [Changelog](CHANGELOG.md)
+[Download v2.55.6](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.6) · [Configuration guide (Chinese)](docs/CONFIGURATION.md) · [Changelog](CHANGELOG.md)
 
 ## Features
 
@@ -18,13 +18,13 @@ Configure the overall size of the Elden Ring player and other characters through
 
 ## Latest changes
 
-Adapt lock-on camera height and distance to equipment proportions. Preserve authored equipment proportions when physics poses become invalid and attempt to reset the affected simulation; recovery from intermittent physics failures still needs in-game confirmation.
+Improve weapon, item and body dummy alignment when matching equipment skeletons are split across multiple parts. Matching parts share one attachment correction, and remaining parts take over when one is removed. Offline validation passed; results with the reported model assets still need in-game confirmation.
 
 ## Installation
 
 For **Windows x64, offline Elden Ring WW2.7.1.0 / game1.17.1**. Other executable versions require separate validation.
 
-1. Download `ERCharacterScale-v2.55.5-windows-x64.zip` from the [Release page](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.5).
+1. Download `ERCharacterScale-v2.55.6-windows-x64.zip` from the [Release page](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.6).
 2. Place `ERCharacterScale.dll` and `ERCharacterScale.toml` in the same directory, and load the DLL with your existing DLL loader.
 3. Edit the TOML configuration as needed, then start the game. Restart the game after later configuration-file changes.
 

@@ -1,0 +1,17 @@
+{
+  "version": "2.55.6",
+  "artifact": "ERCharacterScale.dll",
+  "platform": "windows-x86_64",
+  "configuration": "ERCharacterScale.toml",
+  "license": "MIT",
+  "features": [
+    "Configurable player and character scaling",
+    "Automatic equipment skeleton retargeting with optional cloth physics",
+    "Cross-character animation retargeting",
+    "Cloth, limb IK, weapon and attachment adaptation"
+  ],
+  "updates": [
+    "Improve weapon, item and body dummy alignment for matching multipart equipment skeletons",
+    "Share attachment correction once and transfer ownership when a matching part is removed; in-game model confirmation pending"
+  ]
+}

@@ -54,6 +54,8 @@ mod attachments;
 mod dummies;
 #[path = "equipment_retarget_hook.rs"]
 mod mid_hook;
+#[path = "equipment_retarget_profile.rs"]
+mod profile;
 #[path = "equipment_retarget_recovery.rs"]
 mod recovery;
 #[path = "equipment_retarget_weapon.rs"]
@@ -356,6 +358,7 @@ struct Session {
     cloth_bones: Vec<Bone>,
     mesh_bones: Vec<Bone>,
     mesh_plan: Plan,
+    attachment_profile: profile::AttachmentProfile,
     motion: Option<MotionProfile>,
     cloth_plan: Option<Plan>,
     mesh_to_cloth: Vec<Option<usize>>,
@@ -583,6 +586,7 @@ fn bind(key: Key, identity: Identity, generation: u64, scale: f64, force: bool) 
     }
     let mut mesh_plan = Plan::new(source_bones.clone(), mesh_bones.clone(), &[]).ok()?;
     let motion = MotionProfile::new(&source_bones, &mesh_bones);
+    let attachment_profile = profile::AttachmentProfile::new(&source_bones, &mesh_bones)?;
     if motion.is_some() {
         mesh_plan.calibrate_limb_directions();
     }
@@ -643,6 +647,7 @@ fn bind(key: Key, identity: Identity, generation: u64, scale: f64, force: bool) 
         cloth_bones,
         mesh_bones,
         mesh_plan,
+        attachment_profile,
         motion,
         cloth_plan,
         mesh_to_cloth,

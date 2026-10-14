@@ -144,6 +144,7 @@ fn capture(session: Arc<Session>, slot: usize, base: usize) -> Option<Route> {
 }
 
 pub(super) fn refresh(sessions: &[Arc<Session>], base: usize) {
+    let sessions = profile::attachment_sessions(sessions);
     let Ok(mut routes) = ROUTES.lock() else {
         return;
     };

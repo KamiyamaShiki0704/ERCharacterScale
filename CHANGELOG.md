@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.55.6
+
+- Improve weapon, item and body dummy alignment for matching equipment skeletons split across multiple parts.
+- Apply shared attachment correction once and allow remaining matching parts to take over after removal.
+- Offline validation passed; in-game confirmation with the reported models remains pending.
+
 ## 2.55.5
 
 - Adapt lock-on camera height and distance to equipment proportions.

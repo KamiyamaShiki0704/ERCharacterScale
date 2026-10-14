@@ -171,12 +171,14 @@ fn capture(session: Arc<Session>, base: usize) -> Option<Route> {
     })
 }
 pub(super) fn refresh(sessions: &[Arc<Session>], base: usize) {
+    let sessions = profile::attachment_sessions(sessions);
     let Ok(mut routes) = ROUTES.lock() else {
         return;
     };
     routes.retain(|r| r.current() && sessions.iter().any(|s| Arc::ptr_eq(s, &r.session)));
-    // Multiple full-body profiles cannot unambiguously own a common body point.
-    let mut eligible = sessions.iter().filter(|s| s.motion.is_some());
+    // Matching multi-part equipment shares one correction. Different body
+    // references still cannot unambiguously own a common body point.
+    let mut eligible = sessions.into_iter();
     let Some(session) = eligible.next() else {
         routes.clear();
         return;

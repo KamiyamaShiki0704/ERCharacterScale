@@ -67,7 +67,7 @@ impl std::fmt::Display for TaskLookupError {
 const DLL_PROCESS_DETACH: u32 = 0;
 const DLL_PROCESS_ATTACH: u32 = 1;
 
-const BUILD_MODE: &str = "er-2.55.5";
+const BUILD_MODE: &str = "er-2.55.6";
 const ENABLE_SYNC_DIAGNOSTIC: bool = log::ENABLED;
 const SCALE_COLLISION: bool = true;
 const SCALE_WEIGHT: bool = false;
