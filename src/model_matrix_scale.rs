@@ -1,4 +1,4 @@
-use crate::native_access::CharacterAccess;
+use eldenring::cs::PlayerIns;
 use windows::Win32::System::Memory::{
     MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY,
     PAGE_GUARD, PAGE_NOACCESS, PAGE_READWRITE, PAGE_WRITECOPY, VirtualQuery,
@@ -31,7 +31,7 @@ pub struct IdentityMatrixBufferBaseline {
 }
 
 pub fn scale_player_aabb_identity_matrices(
-    player: &CharacterAccess,
+    player: &PlayerIns,
     state: &mut IdentityMatrixScaleState,
     scale: f32,
 ) {
@@ -84,8 +84,8 @@ pub fn scale_player_aabb_identity_matrices(
     }
 }
 
-fn find_candidate_buffer(player: &CharacterAccess) -> Option<CandidateBuffer> {
-    let chr_ins_addr = player.address;
+fn find_candidate_buffer(player: &PlayerIns) -> Option<CandidateBuffer> {
+    let chr_ins_addr = &player.chr_ins as *const _ as usize;
     let chr_model_ins = read_usize(chr_ins_addr + CHR_INS_MODEL_INS_OFFSET)?;
     let model_item = read_usize(chr_model_ins + CSMODELINS_MODEL_ITEM_OFFSET)?;
     let location_aabb_exporter = read_usize(model_item + MODEL_ITEM_LOCATION_AABB_EXPORTER_OFFSET)?;

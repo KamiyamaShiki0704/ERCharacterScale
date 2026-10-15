@@ -205,14 +205,9 @@ fn bone_space_private_callback_exports_real_corrected_normals() {
             );
             let bytes =
                 unsafe { std::slice::from_raw_parts(normals.as_ptr().cast::<u8>(), n * 16) };
-            for (old, new) in raw
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .zip(bytes.as_chunks::<4>().0.iter())
-            {
-                let a = f32::from_le_bytes(*old);
-                let b = f32::from_le_bytes(*new);
+            for (old, new) in raw.chunks_exact(4).zip(bytes.chunks_exact(4)) {
+                let a = f32::from_le_bytes(old.try_into().unwrap());
+                let b = f32::from_le_bytes(new.try_into().unwrap());
                 assert!(
                     (a - b).abs() < 1e-6 || old == new,
                     "group={group} scale={scale} old={a:?} new={b:?}"
@@ -502,9 +497,7 @@ fn simple_bone_private_fixture_exports_scoped_production_arrays() {
     let raw = crate::test_fixtures::bytes("simple-bone-binds.bin");
     assert_eq!(raw.len() % 64, 0);
     let rows: Vec<_> = raw
-        .as_chunks::<64>()
-        .0
-        .iter()
+        .chunks_exact(64)
         .map(|b| {
             Matrix(std::array::from_fn(|i| {
                 f32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap())

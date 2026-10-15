@@ -1,4 +1,4 @@
-use crate::native_access::CharacterAccess;
+use eldenring::cs::PlayerIns;
 use windows::Win32::System::Memory::{
     MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_GUARD, PAGE_NOACCESS, VirtualQuery,
 };
@@ -35,10 +35,13 @@ const LIVE_RUNTIME_SCAN_BYTES: usize = 0x100;
 const LIVE_RUNTIME_ROW_BYTES: usize = 0x80;
 const HKNP_BODY_SIZE: usize = 0xa0;
 
-pub fn probe_player_hkx_collidables(player: &mut CharacterAccess, scale: f32) {
-    let player_addr = player.address;
-    let chr_ins_addr = player.address;
-    let physics_addr = player.physics_address();
+pub fn probe_player_hkx_collidables(player: &mut PlayerIns, scale: f32) {
+    let player_addr = player as *mut _ as usize;
+    let chr_ins = &mut player.chr_ins;
+    let chr_ins_addr = chr_ins as *mut _ as usize;
+    let chr_ctrl = chr_ins.chr_ctrl.as_mut();
+    let physics = chr_ins.modules.as_mut().physics.as_mut();
+    let physics_addr = physics as *mut _ as usize;
     let hk_collision_shape =
         read_usize(physics_addr + PHYSICS_HK_COLLISION_SHAPE_OFFSET).unwrap_or(0);
     let chr_model_ins = read_usize(chr_ins_addr + CHR_INS_MODEL_INS_OFFSET).unwrap_or(0);
@@ -47,8 +50,8 @@ pub fn probe_player_hkx_collidables(player: &mut CharacterAccess, scale: f32) {
         "[player-scale-no-bone] hkx probe begin scale={scale:.3} player=0x{player_addr:x} chr_ins=0x{chr_ins_addr:x} physics=0x{physics_addr:x}"
     ));
 
-    inspect_runtime_collision_root("ChrCtrl::chr_collision", player.controller_storage());
-    inspect_runtime_collision_root("ChrCtrl::ragdoll_ins", player.ragdoll_address());
+    inspect_runtime_collision_root("ChrCtrl::chr_collision", chr_ctrl.chr_collision);
+    inspect_runtime_collision_root("ChrCtrl::ragdoll_ins", chr_ctrl.ragdoll_ins);
     inspect_root(
         "CSChrPhysicsModule+0xb0 hknp/main shape",
         hk_collision_shape,
@@ -61,9 +64,10 @@ pub fn probe_player_hkx_collidables(player: &mut CharacterAccess, scale: f32) {
     inspect_chr_model_roots(chr_model_ins);
 }
 
-pub fn probe_ragdoll_single_physics_system(player: &mut CharacterAccess, scale: f32) {
-    let player_addr = player.address;
-    let ragdoll = player.ragdoll_address();
+pub fn probe_ragdoll_single_physics_system(player: &mut PlayerIns, scale: f32) {
+    let player_addr = player as *mut _ as usize;
+    let chr_ctrl = player.chr_ins.chr_ctrl.as_mut();
+    let ragdoll = chr_ctrl.ragdoll_ins;
     let system = read_usize(ragdoll + SINGLE_RAGDOLL_SYSTEM_SLOT_OFFSET).unwrap_or(0);
     let system_data = read_usize(system + SINGLE_RAGDOLL_SYSTEM_DATA_OFFSET).unwrap_or(0);
 
@@ -118,9 +122,10 @@ pub fn probe_ragdoll_single_physics_system(player: &mut CharacterAccess, scale: 
     }
 }
 
-pub fn probe_ragdoll_live_runtime_candidates(player: &mut CharacterAccess, scale: f32) {
-    let player_addr = player.address;
-    let ragdoll = player.ragdoll_address();
+pub fn probe_ragdoll_live_runtime_candidates(player: &mut PlayerIns, scale: f32) {
+    let player_addr = player as *mut _ as usize;
+    let chr_ctrl = player.chr_ins.chr_ctrl.as_mut();
+    let ragdoll = chr_ctrl.ragdoll_ins;
     let system = read_usize(ragdoll + SINGLE_RAGDOLL_SYSTEM_SLOT_OFFSET).unwrap_or(0);
     let system_data = read_usize(system + SINGLE_RAGDOLL_SYSTEM_DATA_OFFSET).unwrap_or(0);
     let body_cinfos = hk_array_summary(system_data + HKNP_PHYSICS_SYSTEM_BODY_CINFOS_OFFSET);

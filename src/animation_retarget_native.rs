@@ -423,10 +423,8 @@ fn prepare(args: Args, cache: &mut Cache) -> Option<Args> {
                     if !read(word(0x28), &mut raw) {
                         return Some(args.neutral());
                     }
-                    raw.as_chunks::<2>()
-                        .0
-                        .iter()
-                        .map(|s| i16::from_le_bytes(*s))
+                    raw.chunks_exact(2)
+                        .map(|s| i16::from_le_bytes(s.try_into().unwrap()))
                         .collect()
                 };
                 entry.plan = ClipPlan::new(source.as_ref().clone(), target.bones.clone(), tracks);

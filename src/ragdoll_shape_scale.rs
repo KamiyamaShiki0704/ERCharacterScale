@@ -1,4 +1,4 @@
-use crate::native_access::CharacterAccess;
+use eldenring::cs::PlayerIns;
 use windows::Win32::System::Memory::{
     MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY,
     PAGE_GUARD, PAGE_NOACCESS, PAGE_READWRITE, PAGE_WRITECOPY, VirtualQuery,
@@ -40,7 +40,7 @@ struct CapsuleShapeBaseline {
 }
 
 pub fn scale_player_ragdoll_body_cinfo_capsules(
-    player: &mut CharacterAccess,
+    player: &mut PlayerIns,
     state: &mut RagdollBodyCinfoShapeScaleState,
     scale: f32,
 ) {
@@ -90,8 +90,8 @@ pub fn scale_player_ragdoll_body_cinfo_capsules(
     }
 }
 
-fn find_candidate(player: &mut CharacterAccess) -> Option<Candidate> {
-    let ragdoll_addr = player.ragdoll_address();
+fn find_candidate(player: &mut PlayerIns) -> Option<Candidate> {
+    let ragdoll_addr = player.chr_ins.chr_ctrl.as_mut().ragdoll_ins;
     let system_addr = read_usize(ragdoll_addr + RAGDOLL_SYSTEM_SLOT_OFFSET)?;
     let system_data_addr = read_usize(system_addr + RAGDOLL_SYSTEM_DATA_OFFSET)?;
     let body_cinfos = read_hk_array(system_data_addr + HKNP_PHYSICS_SYSTEM_BODY_CINFOS_OFFSET)?;

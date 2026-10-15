@@ -103,7 +103,7 @@ pub(crate) fn parse(bytes: &[u8], expected: &str) -> Option<Vec<Bone>> {
         return None;
     }
     let mut result = None;
-    for v in variants.as_chunks::<24>().0.iter() {
+    for v in variants.chunks_exact(24) {
         if reader.string(u64_at(v, 8)?)?.as_str() != "hkaAnimationContainer" {
             continue;
         }
@@ -112,7 +112,7 @@ pub(crate) fn parse(bytes: &[u8], expected: &str) -> Option<Vec<Bone>> {
         if count > 32 {
             return None;
         }
-        for s in skeletons.as_chunks::<8>().0.iter() {
+        for s in skeletons.chunks_exact(8) {
             if let Some(bones) = reader.skeleton(u64_at(s, 0)?, expected) {
                 if result.is_some() {
                     return None;

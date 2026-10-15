@@ -18,6 +18,8 @@
 
 ## 本次更新
 
+本版本使用 `fromsoftware-rs` 构建。
+
 改善同一套新骨架拆分为多个装备部件时的武器、道具和身体 Dummy 对齐。骨架一致的部件共用一次挂点修正，换下其中一件后可由其余部件接替。已通过离线验证，实际分件模型的效果仍待确认。
 
 ## 安装
@@ -66,7 +68,7 @@ cd ERCharacterScale
 cargo build --release --locked
 ```
 
-输出为 `target/x86_64-pc-windows-msvc/release/ERCharacterScale.dll`。仓库已配置静态 C/C++ 运行库链接。Cargo 从 Git 获取 `ShikiFSRS`，通过 Cargo 固定到指定提交；仓库不包含该依赖源码或 Git 子模块。`Cargo.lock` 固定依赖解析结果。
+输出为 `target/x86_64-pc-windows-msvc/release/ERCharacterScale.dll`。仓库已配置静态 C/C++ 运行库链接。Cargo 从 Git 获取 `fromsoftware-rs`，通过 Cargo 固定到指定提交；仓库不包含该依赖源码或 Git 子模块。`Cargo.lock` 固定依赖解析结果。
 
 开发与自动检查入口见 [验证说明](docs/VALIDATION.md)。
 

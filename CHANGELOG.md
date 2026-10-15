@@ -2,6 +2,7 @@
 
 ## 2.55.6
 
+- Build with fromsoftware-rs while retaining multipart equipment attachment fixes.
 - Improve weapon, item and body dummy alignment for matching equipment skeletons split across multiple parts.
 - Apply shared attachment correction once and allow remaining matching parts to take over after removal.
 - Offline validation passed; in-game confirmation with the reported models remains pending.

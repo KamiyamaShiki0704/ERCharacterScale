@@ -12,6 +12,8 @@
   ],
   "updates": [
     "Improve weapon, item and body dummy alignment for matching multipart equipment skeletons",
-    "Share attachment correction once and transfer ownership when a matching part is removed; in-game model confirmation pending"
-  ]
+    "Share attachment correction once and transfer ownership when a matching part is removed; in-game model confirmation pending",
+    "Build with fromsoftware-rs"
+  ],
+  "runtime_sdk": "fromsoftware-rs"
 }

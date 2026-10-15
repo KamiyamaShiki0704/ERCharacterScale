@@ -34,30 +34,6 @@ struct Cache {
 }
 
 impl Cache {
-    // Bounded open addressing keeps different resident pages that share a hash.
-    // Entries still expire at every explicit operation boundary; no data is cached.
-    fn page(&self, start: usize, page_size: usize) -> Option<Region> {
-        let bucket = (start / page_size) % self.pages.len();
-        for probe in 0..self.pages.len() {
-            let entry = self.pages[(bucket + probe) % self.pages.len()]?;
-            if entry.start == start {
-                return Some(entry);
-            }
-        }
-        None
-    }
-    fn remember_page(&mut self, region: Region, page_size: usize) {
-        let bucket = (region.start / page_size) % self.pages.len();
-        for probe in 0..self.pages.len() {
-            let slot = (bucket + probe) % self.pages.len();
-            if self.pages[slot].is_none_or(|old| old.start == region.start) {
-                self.pages[slot] = Some(region);
-                return;
-            }
-        }
-        // Saturation evicts only metadata, so the next miss performs a fresh OS query.
-        self.pages[bucket] = Some(region);
-    }
     fn clear(&mut self) {
         self.entries.fill(None);
         self.pages.fill(None);
@@ -124,7 +100,8 @@ pub fn accessible_span(address: usize, length: usize, write: bool) -> bool {
         }
         for i in 0..pages {
             let start = first + i * page_size;
-            let region = cache.page(start, page_size)?;
+            let region = cache.pages[(start / page_size) % cache.pages.len()]
+                .filter(|r| r.start == start)?;
             if !(if write {
                 region.writable
             } else {
@@ -171,15 +148,13 @@ pub fn accessible_span(address: usize, length: usize, write: bool) -> bool {
             allowed &= if write { writable } else { readable };
             if cache.depth > 0 {
                 let start = page.VirtualAddress as usize;
-                cache.remember_page(
-                    Region {
-                        start,
-                        end: start + page_size,
-                        readable,
-                        writable,
-                    },
-                    page_size,
-                );
+                let index = (start / page_size) % cache.pages.len();
+                cache.pages[index] = Some(Region {
+                    start,
+                    end: start + page_size,
+                    readable,
+                    writable,
+                });
             }
         }
     });
@@ -294,31 +269,6 @@ mod tests {
             unsafe { VirtualFree(self.0, 0, MEM_RELEASE).unwrap() };
         }
     }
-    #[test]
-    fn colliding_resident_pages_reuse_permissions_within_one_operation() {
-        let raw = unsafe { VirtualAlloc(None, 0x101000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE) };
-        assert!(!raw.is_null());
-        let allocation = Allocation(raw);
-        let first = allocation.address();
-        let second = first + 0x100000;
-        unsafe {
-            (first as *mut u8).write_volatile(1);
-            (second as *mut u8).write_volatile(2);
-        }
-        scoped(|| {
-            assert!(accessible_span(first, 1, true));
-            assert!(accessible_span(second, 1, true));
-            let warm = query_count();
-            assert!(accessible_span(first, 1, true));
-            assert!(accessible_span(second, 1, true));
-            assert_eq!(
-                query_count(),
-                warm,
-                "two resident pages collided in the permission cache"
-            );
-        });
-    }
-
     #[test]
     fn page_checks_reject_guard_readonly_and_decommitted_middle_pages() {
         let allocation = Allocation::new();

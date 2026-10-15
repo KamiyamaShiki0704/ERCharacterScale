@@ -17,9 +17,7 @@ fn captured_bd1220_resources_are_not_rebuilt_every_frame() {
     for row in rows.iter().filter(|r| r[0] == "R") {
         let bytes: Vec<u8> = row[2]
             .as_bytes()
-            .as_chunks::<2>()
-            .0
-            .iter()
+            .chunks_exact(2)
             .map(|s| u8::from_str_radix(std::str::from_utf8(s).unwrap(), 16).unwrap())
             .collect();
         let mut heap = vec![0u128; bytes.len().div_ceil(16)];
