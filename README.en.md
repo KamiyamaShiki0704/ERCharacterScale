@@ -20,7 +20,7 @@ Configure the overall size of the Elden Ring player and other characters through
 
 This release is built with `fromsoftware-rs`.
 
-Improve weapon, item and body dummy alignment when matching equipment skeletons are split across multiple parts. Matching parts share one attachment correction, and remaining parts take over when one is removed. Offline validation passed; results with the reported model assets still need in-game confirmation.
+Improve weapon, item and body dummy alignment when matching equipment skeletons are split across multiple parts. Matching parts share one attachment correction, and remaining parts take over when one is removed.
 
 ## Installation
 

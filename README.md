@@ -1,5 +1,3 @@
-> 2026-10-21 compatibility build: ER App 1.17.2 / EXE 2.7.2.0. The candidate in `dist/er-1.17.2/` passed automated checks and is installed in the main `_GoldenAge` Mod. In-game acceptance is pending. Current spec, hashes, rollback and evidence: [1.17.2 build record](../../Topics/Gameplay/bug-er-1-17-2-dll-compat/build.md). Earlier version/publication notes below retain their original scope.
-
 # ERCharacterScale
 
 **简体中文** | [English](README.en.md)
@@ -22,7 +20,7 @@
 
 本版本使用 `fromsoftware-rs` 构建。
 
-改善同一套新骨架拆分为多个装备部件时的武器、道具和身体 Dummy 对齐。骨架一致的部件共用一次挂点修正，换下其中一件后可由其余部件接替。已通过离线验证，实际分件模型的效果仍待确认。
+改善同一套新骨架拆分为多个装备部件时的武器、道具和身体 Dummy 对齐。骨架一致的部件共用一次挂点修正，换下其中一件后可由其余部件接替。
 
 ## 安装
 
