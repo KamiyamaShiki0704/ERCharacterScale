@@ -5491,7 +5491,9 @@ fn cloth_render_range_hook(registers: *mut Registers, original: usize) -> usize 
     // All other callers and neutral scale take the cheap original path.
     if !valid_active_scale(scale)
         || caller_from_stack(registers.rsp as usize)
-            != MODULE_BASE.load(Ordering::Acquire) + ER_CLOTH_RENDER_RETURN_RVA
+            != MODULE_BASE.load(Ordering::Acquire)
+                + crate::compatibility::rva(ER_CLOTH_RENDER_CALL_RVA)
+                + (ER_CLOTH_RENDER_RETURN_RVA - ER_CLOTH_RENDER_CALL_RVA)
     {
         return unsafe { original(this, output, requested, start) };
     }
@@ -6175,7 +6177,7 @@ fn skin_normal_hook_fresh_output_scope_and_lifecycle_regression() {
         (0x1200, ER_POSE_IMPORTER_VTABLE_RVA),
         (0x3200, ER_CLOTH_SKIN_PN_VTABLE_RVA),
     ] {
-        put(at, image + rva);
+        put(at, image + crate::compatibility::rva(rva));
     }
     for at in [
         0x2528, 0x2538, 0x2920, 0x3250, 0x3260, 0x32E8, 0x32F8, 0x3310,
@@ -6304,7 +6306,7 @@ fn skin_normal_hook_fresh_output_scope_and_lifecycle_regression() {
         (0x828, 0, "route_selection"),
         (
             0x3200,
-            image + ER_CLOTH_MESH_PN_VTABLE_RVA,
+            image + crate::compatibility::rva(ER_CLOTH_MESH_PN_VTABLE_RVA),
             "operator_vtable",
         ),
         (0x3300, 1usize << 32, "pn_deformer"),
@@ -6378,7 +6380,10 @@ fn skin_normal_hook_fresh_output_scope_and_lifecycle_regression() {
     }
     for (at, replacement) in [
         (0x828, 0),
-        (0x3200, image + ER_CLOTH_MESH_PN_VTABLE_RVA),
+        (
+            0x3200,
+            image + crate::compatibility::rva(ER_CLOTH_MESH_PN_VTABLE_RVA),
+        ),
         (0x3300, 1usize << 32),
         (0x32F8, 0),
         (0x3258, 0),
@@ -6898,7 +6903,10 @@ fn cloth_mesh_pn_hook(registers: *mut Registers, original: usize) -> usize {
         if !HOOKS_READY.load(Ordering::Acquire)
             || !valid_active_scale(scale)
             || read_usize(op)
-                != Some(MODULE_BASE.load(Ordering::Acquire) + ER_CLOTH_MESH_PN_VTABLE_RVA)
+                != Some(
+                    MODULE_BASE.load(Ordering::Acquire)
+                        + crate::compatibility::rva(ER_CLOTH_MESH_PN_VTABLE_RVA),
+                )
         {
             return None;
         }
@@ -7010,7 +7018,7 @@ fn correct_cloth_mesh_frames(
     }
     let op_type = read_usize(op)?;
     let image = MODULE_BASE.load(Ordering::Acquire);
-    let pn = if op_type == image + ER_CLOTH_MESH_PN_VTABLE_RVA {
+    let pn = if op_type == image + crate::compatibility::rva(ER_CLOTH_MESH_PN_VTABLE_RVA) {
         if mode != 0 {
             return None;
         }
@@ -7024,7 +7032,7 @@ fn correct_cloth_mesh_frames(
             return None;
         }
         Some(call)
-    } else if op_type == image + ER_CLOTH_MESH_P_VTABLE_RVA {
+    } else if op_type == image + crate::compatibility::rva(ER_CLOTH_MESH_P_VTABLE_RVA) {
         None
     } else {
         return None;
@@ -7933,7 +7941,7 @@ fn diagnostic_selector_requires_exact_current_bd9004_active_children() {
         (0xE00, 0x329A2F8),
         (0x1200, 0x2B70360),
     ] {
-        put(&mut data, at, image + rva);
+        put(&mut data, at, image + crate::compatibility::rva(rva));
     }
     for (at, n) in [
         (0x26D8, 9),
@@ -8453,8 +8461,19 @@ mod tests {
     #[test]
     #[ignore = "requires private replay data; set ER_CHARACTER_SCALE_FIXTURES"]
     fn bd9004_mesh_reference_hook_corrects_owned_fresh_frames() {
+        check_mesh_reference_hook(false);
+    }
+
+    #[test]
+    #[ignore = "requires private replay data; set ER_CHARACTER_SCALE_FIXTURES"]
+    fn ww272_bd9004_mesh_reference_hook_corrects_owned_fresh_frames() {
+        check_mesh_reference_hook(true);
+    }
+
+    fn check_mesh_reference_hook(ww272: bool) {
         let unit_state = current_unit_state();
         let _lock = MODULE_TEST_LOCK.lock().unwrap();
+        let _profile = crate::compatibility::owned_image_profile(ww272);
         clear_target();
         let image = 0x140000000;
         let mut memory = vec![0usize; 0x4000 / 8];
@@ -8462,7 +8481,11 @@ mod tests {
         fn put(m: &mut [usize], at: usize, value: usize) {
             m[at / 8] = value;
         }
-        put(&mut memory, 0x3200, image + ER_CLOTH_MESH_P_VTABLE_RVA);
+        put(
+            &mut memory,
+            0x3200,
+            image + crate::compatibility::rva(ER_CLOTH_MESH_P_VTABLE_RVA),
+        );
         for (at, offset) in [
             (0x748, 0x800),
             (0x150, 0xA00),
@@ -8498,7 +8521,7 @@ mod tests {
             (0xE00, ER_CLOTH_INNER_VTABLE_RVA),
             (0x1200, ER_POSE_IMPORTER_VTABLE_RVA),
         ] {
-            put(&mut memory, at, image + rva);
+            put(&mut memory, at, image + crate::compatibility::rva(rva));
         }
         for at in [0x2528, 0x2548] {
             put(&mut memory, at, 1);
@@ -8740,7 +8763,11 @@ mod tests {
         put(&mut memory, 0x3250, 0);
         // The real PN route must bracket the native call, not shrink reference
         // normals together with the positions. Three padded output vertices.
-        put(&mut memory, 0x3200, image + ER_CLOTH_MESH_PN_VTABLE_RVA);
+        put(
+            &mut memory,
+            0x3200,
+            image + crate::compatibility::rva(ER_CLOTH_MESH_PN_VTABLE_RVA),
+        );
         for (at, offset) in [
             (0x32C8, 0x3800),
             (0x32F8, 0x3900),
@@ -8998,8 +9025,18 @@ mod tests {
 
     #[test]
     fn render_hook_owns_fresh_ranges_and_rejects_lifecycle_changes() {
+        check_render_hook_ranges(false);
+    }
+
+    #[test]
+    fn ww272_render_hook_owns_fresh_ranges_and_rejects_lifecycle_changes() {
+        check_render_hook_ranges(true);
+    }
+
+    fn check_render_hook_ranges(ww272: bool) {
         let unit_state = current_unit_state();
         let _lock = MODULE_TEST_LOCK.lock().unwrap();
+        let _profile = crate::compatibility::owned_image_profile(ww272);
         clear_target();
         let image = 0x140000000;
         let mut memory = vec![0usize; 0x2300 / 8];
@@ -9041,7 +9078,7 @@ mod tests {
             (0x1200, ER_POSE_IMPORTER_VTABLE_RVA),
             (0x1500, ER_ANIM_SKELETON_VTABLE_RVA),
         ] {
-            put(&mut memory, at, image + rva);
+            put(&mut memory, at, image + crate::compatibility::rva(rva));
         }
         for at in [0x1258, 0x1268, 0x1278, 0x1438, 0x1D28, 0x1E20, 0x1F10] {
             put(&mut memory, at, 3);
@@ -9090,7 +9127,7 @@ mod tests {
             }
             n as usize
         }
-        let stack = [image + ER_CLOTH_RENDER_RETURN_RVA];
+        let stack = [image + crate::compatibility::rva(ER_CLOTH_RENDER_CALL_RVA) + 3];
         let mut output = [[0.; 12]; 4];
         let mut registers: Registers = unsafe { std::mem::zeroed() };
         registers.rcx = this as u64;
@@ -9119,7 +9156,7 @@ mod tests {
         assert_eq!(output[0][7], 1.6);
         registers.r9 = 0;
         registers.r8 = 4;
-        for scale in [1.0f32, 3., 0.5] {
+        for scale in [1.0f32, 0.85, 3., 0.5] {
             unit_state
                 .target_scale_bits
                 .store(scale.to_bits(), Ordering::Release);
@@ -9132,7 +9169,7 @@ mod tests {
         }
         // Changed call site, pending transition, primary input, and revoked
         // equipment all pass through even if the memory/vtable still exists.
-        let other_stack = [image + ER_CLOTH_RENDER_RETURN_RVA + 1];
+        let other_stack = [stack[0] + 1];
         registers.rsp = other_stack.as_ptr() as u64;
         cloth_render_range_hook(&mut registers, native as *const () as usize);
         assert_eq!(output, [RAW; 4]);
