@@ -104,6 +104,48 @@ fn camera_locked_distance_follows_body_height_without_changing_enemy_parameters(
 }
 
 #[test]
+fn invalid_cloth_branch_keeps_other_native_physics_and_recovers_next_frame() {
+    let fixture = NativeTest::new();
+    refresh(fixture.character.address, 1.0, 1);
+    let mut private = solver_input(fixture.inner, fixture.input + 0x48, fixture.transform).unwrap();
+    private.context();
+    private.completed();
+    let core = ptr(fixture.inner + 0x30).unwrap();
+    let entries = ptr(core + 0x40).unwrap();
+    fixture._heap.put(ptr(entries + 0x18).unwrap(), 12u32); // Hand + hair written.
+    fixture._heap.put(
+        fixture.input_models + 2 * 48,
+        pose::qs_output(LocalPose {
+            translation: DVec3::X * 1.7,
+            ..LocalPose::IDENTITY
+        })
+        .unwrap(),
+    );
+    fixture
+        ._heap
+        .put(fixture.input_models + 3 * 48, [f32::NAN; 12]);
+    let output = fixture.draw();
+    assert!(
+        (output[2][3] - 1.7).abs() < 1e-6,
+        "one bad cloth branch disabled healthy physics"
+    );
+    assert!(output.iter().flatten().all(|v| v.is_finite()));
+    fixture._heap.put(
+        fixture.input_models + 3 * 48,
+        pose::qs_output(LocalPose {
+            translation: DVec3::X * 1.9,
+            ..LocalPose::IDENTITY
+        })
+        .unwrap(),
+    );
+    let output = fixture.draw();
+    assert!(
+        (output[3][3] - 1.9).abs() < 1e-6,
+        "valid physics did not resume"
+    );
+}
+
+#[test]
 fn invalid_simulated_hair_does_not_discard_body_retargeting_or_propagate_nan() {
     let fixture = NativeTest::new();
     refresh(fixture.character.address, 1.0, 1);
@@ -161,6 +203,161 @@ fn add_recovery_group(fixture: &mut NativeTest) -> (usize, usize, usize) {
     h.put(indices, 0i32);
     h.put(child + 0x50, 17u32);
     (holder, child, indices)
+}
+
+fn add_particle_history(fixture: &mut NativeTest) -> (usize, usize, usize) {
+    let (holder, _, _) = add_recovery_group(fixture);
+    let h = &mut fixture._heap;
+    let root = ptr(holder).unwrap();
+    let children = ptr(root + 0x40).unwrap();
+    let child = h.alloc(0x280);
+    let sim = h.alloc(0x200);
+    let current = h.alloc(3 * 16);
+    let previous = h.alloc(3 * 16);
+    h.put(children, child);
+    h.put(child, TEST_BASE + crate::compatibility::rva(0x2D872A0));
+    h.put(sim, TEST_BASE + crate::compatibility::rva(0x2D8B6F8));
+    h.put(child + 0x18, sim);
+    h.put(child + 0x20, current);
+    h.put(child + 0x28, 3i32);
+    h.put(child + 0x30, previous);
+    h.put(child + 0x38, 3i32);
+    h.put(child + 0x268, root);
+    h.put(sim + 0x48, 3i32);
+    h.put(child + 0x50, 0.016f32);
+    h.put(fixture.transform, DMat4::IDENTITY.as_mat4().to_cols_array());
+    for i in 0..3 {
+        h.put(
+            current + i * 16,
+            [i as f32 + 1.0, 2.0, 3.0, 10.0 + i as f32],
+        );
+        h.put(
+            previous + i * 16,
+            [i as f32 + 0.5, 2.0, 3.0, 20.0 + i as f32],
+        );
+    }
+    (child, current, previous)
+}
+
+#[test]
+fn recent_valid_particle_history_repairs_nan_without_rewinding_character_placement() {
+    let mut fixture = NativeTest::new();
+    let (child, current, previous) = add_particle_history(&mut fixture);
+    refresh(fixture.character.address, 1.0, 1);
+    let mut input = solver_input(fixture.inner, fixture.input + 0x48, fixture.transform).unwrap();
+    input.context();
+    input.completed();
+    for i in 0..3 {
+        fixture._heap.put(current + i * 16, [f32::NAN; 4]);
+        fixture._heap.put(previous + i * 16, [f32::NAN; 4]);
+    }
+    let moved =
+        DMat4::from_rotation_translation(glam::DQuat::from_rotation_y(0.3), DVec3::X * 10.0);
+    fixture
+        ._heap
+        .put(fixture.transform, moved.as_mat4().to_cols_array());
+    refresh(fixture.character.address, 1.0, 2);
+    let mut input = solver_input(fixture.inner, fixture.input + 0x48, fixture.transform).unwrap();
+    input.context();
+    input.completed();
+    for i in 0..3 {
+        let c = pose::bytes::<16>(&read, current + i * 16).unwrap();
+        let p = pose::bytes::<16>(&read, previous + i * 16).unwrap();
+        let c: [f32; 4] =
+            std::array::from_fn(|k| f32::from_le_bytes(c[k * 4..k * 4 + 4].try_into().unwrap()));
+        let p: [f32; 4] =
+            std::array::from_fn(|k| f32::from_le_bytes(p[k * 4..k * 4 + 4].try_into().unwrap()));
+        let expected = moved.transform_point3(DVec3::new(i as f64 + 1.0, 2.0, 3.0));
+        assert!(
+            c.iter().all(|v| v.is_finite()),
+            "poisoned simulation remained NaN"
+        );
+        assert!(DVec3::new(c[0] as f64, c[1] as f64, c[2] as f64).abs_diff_eq(expected, 1e-5));
+        assert_eq!(c[..3], p[..3], "recovery retained explosive velocity");
+        assert_eq!(c[3], 10.0 + i as f32);
+        assert_eq!(p[3], 20.0 + i as f32);
+    }
+    assert_eq!(
+        pose::bytes::<4>(&read, child + 0x50),
+        Some(0.0f32.to_le_bytes())
+    );
+}
+
+#[test]
+fn healthy_particle_history_is_read_only_and_stale_history_is_not_reused() {
+    let mut fixture = NativeTest::new();
+    let (child, current, previous) = add_particle_history(&mut fixture);
+    refresh(fixture.character.address, 1.0, 1);
+    let before = pose::bytes::<48>(&read, current).unwrap();
+    let before_previous = pose::bytes::<48>(&read, previous).unwrap();
+    let mut input = solver_input(fixture.inner, fixture.input + 0x48, fixture.transform).unwrap();
+    input.context();
+    input.completed();
+    assert_eq!(pose::bytes::<48>(&read, current), Some(before));
+    assert_eq!(pose::bytes::<48>(&read, previous), Some(before_previous));
+    assert_eq!(
+        pose::bytes::<4>(&read, child + 0x50),
+        Some(0.016f32.to_le_bytes())
+    );
+    fixture._heap.put(current, [f32::NAN; 4]);
+    refresh(fixture.character.address, 1.0, 8);
+    let mut input = solver_input(fixture.inner, fixture.input + 0x48, fixture.transform).unwrap();
+    input.context();
+    input.completed();
+    assert_eq!(
+        pose::bytes::<16>(&read, current),
+        Some([f32::NAN.to_le_bytes(); 4].concat().try_into().unwrap())
+    );
+}
+
+#[test]
+fn replaced_or_revoked_particle_histories_do_not_receive_old_coordinates() {
+    for revoke in [false, true] {
+        let mut fixture = NativeTest::new();
+        let (child, current, _) = add_particle_history(&mut fixture);
+        refresh(fixture.character.address, 1.0, 1);
+        let mut input =
+            solver_input(fixture.inner, fixture.input + 0x48, fixture.transform).unwrap();
+        input.context();
+        input.completed();
+        let replacement = fixture._heap.alloc(48);
+        for i in 0..3 {
+            fixture._heap.put(replacement + i * 16, [f32::NAN; 4]);
+        }
+        if revoke {
+            fixture._heap.put(fixture.slot, 0usize);
+        } else {
+            fixture._heap.put(child + 0x20, replacement);
+        }
+        input.completed();
+        assert_eq!(
+            pose::bytes::<48>(&read, replacement),
+            Some([f32::NAN.to_le_bytes(); 12].concat().try_into().unwrap())
+        );
+        assert_ne!(
+            pose::bytes::<16>(&read, current),
+            pose::bytes::<16>(&read, replacement)
+        );
+    }
+}
+
+#[test]
+fn scale_changes_invalidate_particle_history_before_recovery() {
+    let mut fixture = NativeTest::new();
+    let (_, current, _) = add_particle_history(&mut fixture);
+    refresh(fixture.character.address, 1.0, 1);
+    let mut input = solver_input(fixture.inner, fixture.input + 0x48, fixture.transform).unwrap();
+    input.context();
+    input.completed();
+    fixture._heap.put(current, [f32::NAN; 4]);
+    refresh(fixture.character.address, 0.3, 2);
+    let mut input = solver_input(fixture.inner, fixture.input + 0x48, fixture.transform).unwrap();
+    input.context();
+    input.completed();
+    assert_eq!(
+        pose::bytes::<16>(&read, current),
+        Some([f32::NAN.to_le_bytes(); 4].concat().try_into().unwrap())
+    );
 }
 
 #[test]

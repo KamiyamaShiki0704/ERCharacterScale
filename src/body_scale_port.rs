@@ -2037,8 +2037,10 @@ fn target_cloth_slot_and_owner_for_inner(inner: usize) -> Option<(usize, usize)>
     if base == 0 || inner == 0 || target_input == 0 {
         return None;
     }
-    let expected_outer_vtable = base.saturating_add(ER_CLOTH_MODEL_VTABLE_RVA);
-    let expected_inner_vtable = base.saturating_add(ER_CLOTH_INNER_VTABLE_RVA);
+    let expected_outer_vtable =
+        base.saturating_add(crate::compatibility::rva(ER_CLOTH_MODEL_VTABLE_RVA));
+    let expected_inner_vtable =
+        base.saturating_add(crate::compatibility::rva(ER_CLOTH_INNER_VTABLE_RVA));
     if !object_has_vtable(inner, expected_inner_vtable)
         || read_usize(inner.saturating_add(0x30)).unwrap_or(0) == 0
     {
@@ -2453,8 +2455,10 @@ fn cloth_inner_commit_hook(registers: *mut Registers, original: usize) -> usize 
     let mut pending_mask = unit_state.cloth_pending_slot_mask.load(Ordering::Acquire);
     if pending_mask != 0 {
         let base = MODULE_BASE.load(Ordering::Acquire);
-        let expected_outer_vtable = base.saturating_add(ER_CLOTH_MODEL_VTABLE_RVA);
-        let expected_inner_vtable = base.saturating_add(ER_CLOTH_INNER_VTABLE_RVA);
+        let expected_outer_vtable =
+            base.saturating_add(crate::compatibility::rva(ER_CLOTH_MODEL_VTABLE_RVA));
+        let expected_inner_vtable =
+            base.saturating_add(crate::compatibility::rva(ER_CLOTH_INNER_VTABLE_RVA));
         let target_input = unit_state
             .target_cloth_pose_importer
             .load(Ordering::Acquire);
@@ -2813,8 +2817,10 @@ fn sync_target_cloth_attachment_positions(inner: usize, current_transform: usize
         return;
     }
 
-    let expected_outer_vtable = base.saturating_add(ER_CLOTH_MODEL_VTABLE_RVA);
-    let expected_inner_vtable = base.saturating_add(ER_CLOTH_INNER_VTABLE_RVA);
+    let expected_outer_vtable =
+        base.saturating_add(crate::compatibility::rva(ER_CLOTH_MODEL_VTABLE_RVA));
+    let expected_inner_vtable =
+        base.saturating_add(crate::compatibility::rva(ER_CLOTH_INNER_VTABLE_RVA));
     for slot in 0..CLOTH_INSTANCE_SLOTS {
         let owner = unit_state.cloth_instance_owners[slot].load(Ordering::Acquire);
         if owner == 0
@@ -3045,8 +3051,9 @@ fn queue_cloth_scale_transitions_inner(target_input: usize, requested_scale: f32
 
     let requested_bits = requested_scale.to_bits();
     let base = MODULE_BASE.load(Ordering::Acquire);
-    let expected_vtable = base.saturating_add(ER_CLOTH_MODEL_VTABLE_RVA);
-    let expected_inner_vtable = base.saturating_add(ER_CLOTH_INNER_VTABLE_RVA);
+    let expected_vtable = base.saturating_add(crate::compatibility::rva(ER_CLOTH_MODEL_VTABLE_RVA));
+    let expected_inner_vtable =
+        base.saturating_add(crate::compatibility::rva(ER_CLOTH_INNER_VTABLE_RVA));
     let mut queued = 0usize;
     for slot in 0..CLOTH_INSTANCE_SLOTS {
         let owner = unit_state.cloth_instance_owners[slot].load(Ordering::Acquire);
@@ -3335,7 +3342,7 @@ pub fn cloth_instance_snapshots(
     }
 
     let base = MODULE_BASE.load(Ordering::Acquire);
-    let expected_vtable = base.saturating_add(ER_CLOTH_MODEL_VTABLE_RVA);
+    let expected_vtable = base.saturating_add(crate::compatibility::rva(ER_CLOTH_MODEL_VTABLE_RVA));
     for (slot, snapshot) in snapshots.iter_mut().enumerate() {
         let owner = unit_state.cloth_instance_owners[slot].load(Ordering::Acquire);
         let captured_input = unit_state.cloth_instance_inputs[slot].load(Ordering::Acquire);
@@ -3557,8 +3564,10 @@ pub fn target_cloth_simulation_set(target_input: usize) -> TargetClothSimulation
     }
 
     let base = MODULE_BASE.load(Ordering::Acquire);
-    let expected_owner_vtable = base.saturating_add(ER_CLOTH_MODEL_VTABLE_RVA);
-    let expected_inner_vtable = base.saturating_add(ER_CLOTH_INNER_VTABLE_RVA);
+    let expected_owner_vtable =
+        base.saturating_add(crate::compatibility::rva(ER_CLOTH_MODEL_VTABLE_RVA));
+    let expected_inner_vtable =
+        base.saturating_add(crate::compatibility::rva(ER_CLOTH_INNER_VTABLE_RVA));
 
     for (slot, owner) in unit_state.cloth_instance_owners.iter().enumerate() {
         let owner = owner.load(Ordering::Acquire);
@@ -8237,8 +8246,18 @@ mod tests {
 
     #[test]
     fn owned_equipment_inputs_reach_source_transition_and_collision_paths() {
+        check_owned_equipment_inputs(false);
+    }
+
+    #[test]
+    fn ww272_owned_equipment_inputs_reach_source_transition_and_collision_paths() {
+        check_owned_equipment_inputs(true);
+    }
+
+    fn check_owned_equipment_inputs(ww272: bool) {
         let unit_state = current_unit_state();
         let _module_guard = MODULE_TEST_LOCK.lock().unwrap();
+        let _profile = crate::compatibility::owned_image_profile(ww272);
         // Three independent inputs mirror the frozen HD / BD / HR live chain.
         // A duplicate equipment slot must not double-apply the same owner.
         let base = 0x140000000;

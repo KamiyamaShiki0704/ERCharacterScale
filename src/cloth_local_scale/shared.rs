@@ -460,6 +460,37 @@ mod tests {
     }
 
     #[test]
+    fn convex_plane_equipment_is_allowed_to_keep_requested_overall_scale() {
+        let _environment = Environment::new();
+        let mut particles = [0.0f32, 0.0, 1.0, 0.0];
+        let mut planes = [[1.0f32, 0.0, 0.0, -2.0]];
+        let mut shape = [0usize; 0xe0 / 8];
+        shape[0] = BASE + ER_HCL_CONVEX_PLANES_SHAPE_VTABLE_RVA;
+        shape[0x20 / 8] = planes.as_mut_ptr() as usize;
+        shape[0x28 / 8] = 1;
+        let mut collider = [0usize; 0xa0 / 8];
+        collider[0] = BASE + ER_HCL_COLLIDABLE_VTABLE_RVA;
+        collider[0x88 / 8] = shape.as_ptr() as usize;
+        let colliders = [collider.as_ptr() as usize];
+        let mut sim = simulation(particles.as_mut_ptr() as usize);
+        sim[0xd0 / 8] = colliders.as_ptr() as usize;
+        sim[0xd8 / 8] = 1;
+        let actor = Character::new(5290, 1, 1.0);
+        actor.attach_cloth(sim.as_ptr() as usize);
+        let mut pool = Pool::default();
+        let prepared = pool.prepare(&[Consumer {
+            identity: actor.identity(),
+            scale: 0.85,
+        }]);
+        assert!(
+            prepared.rejected.is_empty(),
+            "overall scale rejected: {:?}",
+            prepared.rejected
+        );
+        assert_eq!(prepared.scales.get(&(shape.as_ptr() as usize)), Some(&0.85));
+    }
+
+    #[test]
     fn native_collidable_without_transform_map_keeps_one_cached_baseline() {
         let _environment = Environment::new();
         let mut particle = [0.0f32, 0.0, 2.0, 0.0];

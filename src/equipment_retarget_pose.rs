@@ -248,6 +248,7 @@ pub(crate) fn skeleton(
 #[derive(Default)]
 pub(crate) struct PoseScratch {
     pub invalid_transform: bool,
+    pub valid: Vec<bool>,
     raw_local: Vec<u8>,
     raw_model: Vec<u8>,
     flags: Vec<u8>,
@@ -322,7 +323,33 @@ impl PoseScratch {
         skeleton: &[Bone],
         overall_scale: f64,
     ) -> Option<()> {
+        self.capture_model_impl(read, context, identity, skeleton, overall_scale, false)
+    }
+
+    /// Solver output may lose one branch without invalidating unrelated model
+    /// rows. Consumers must consult `valid`; animation input remains strict.
+    pub fn capture_model_partial(
+        &mut self,
+        read: &Reader<'_>,
+        context: usize,
+        identity: &SkeletonIdentity,
+        skeleton: &[Bone],
+        overall_scale: f64,
+    ) -> Option<()> {
+        self.capture_model_impl(read, context, identity, skeleton, overall_scale, true)
+    }
+
+    fn capture_model_impl(
+        &mut self,
+        read: &Reader<'_>,
+        context: usize,
+        identity: &SkeletonIdentity,
+        skeleton: &[Bone],
+        overall_scale: f64,
+        partial: bool,
+    ) -> Option<()> {
         self.invalid_transform = false;
+        self.valid.clear();
         self.local.clear();
         if !overall_scale.is_finite() || overall_scale <= 0.0 || !identity.current(read) {
             return None;
@@ -340,6 +367,7 @@ impl PoseScratch {
         self.raw_model.resize(n * 48, 0);
         self.flags.resize(n * 4, 0);
         self.model.resize(n, DMat4::IDENTITY);
+        self.valid.resize(n, false);
         if !read(ptr_at(&header, 8), &mut self.raw_local)
             || !read(ptr_at(&header, 0x18), &mut self.raw_model)
             || !read(ptr_at(&header, 0x28), &mut self.flags)
@@ -349,6 +377,9 @@ impl PoseScratch {
         for (i, bone) in skeleton.iter().enumerate() {
             let flags = i32_at(&self.flags, i * 4);
             if flags & 3 == 3 {
+                if partial {
+                    continue;
+                }
                 return None;
             }
             let raw = if flags & 2 == 0 {
@@ -359,26 +390,55 @@ impl PoseScratch {
             let Some(decoded) = qs(&raw[i * 48..(i + 1) * 48]) else {
                 self.invalid_transform =
                     bytes(read, context) == Some(header) && identity.current(read);
+                if partial {
+                    continue;
+                }
                 return None;
             };
+            if flags & 2 != 0 && bone.parent.is_some_and(|p| !self.valid[p]) {
+                if partial {
+                    continue;
+                }
+                return None;
+            }
             self.model[i] = if flags & 2 == 0 {
                 matrix(decoded)
             } else {
                 let local = matrix(decoded);
                 bone.parent.map_or(local, |p| self.model[p] * local)
             };
+            self.valid[i] = self.model[i].is_finite();
+            if !self.valid[i] {
+                self.invalid_transform =
+                    bytes(read, context) == Some(header) && identity.current(read);
+                if !partial {
+                    return None;
+                }
+            }
         }
         let undo = DMat4::from_scale(DVec3::splat(1.0 / overall_scale));
-        for m in &mut self.model {
+        for (i, m) in self.model.iter_mut().enumerate() {
+            if !self.valid[i] {
+                continue;
+            }
             *m = undo * *m;
             if !m.is_finite() {
                 self.invalid_transform =
                     bytes(read, context) == Some(header) && identity.current(read);
+                self.valid[i] = false;
+                if partial {
+                    continue;
+                }
                 return None;
             }
         }
         // A changing array header invalidates the entire private snapshot.
-        (bytes(read, context) == Some(header) && identity.current(read)).then_some(())
+        if bytes(read, context) != Some(header) || !identity.current(read) {
+            self.invalid_transform = false;
+            self.valid.fill(false);
+            return None;
+        }
+        Some(())
     }
 }
 

@@ -2,6 +2,56 @@ use super::*;
 use crate::body_scale_port::test_characters::{BASE, Environment};
 
 #[test]
+fn convex_plane_collection_scales_distances_bounds_and_restores_on_both_profiles() {
+    let _environment = Environment::new();
+    for newer in [false, true] {
+        let _profile = crate::compatibility::owned_image_profile(newer);
+        let mut shape = [0usize; 0xe0 / 8];
+        let mut planes = [
+            [1.0f32, 0.0, 0.0, -2.0],
+            [-1.0, 0.0, 0.0, -2.0],
+            [0.0, 1.0, 0.0, -1.0],
+        ];
+        shape[0] = BASE + crate::compatibility::rva(ER_HCL_CONVEX_PLANES_SHAPE_VTABLE_RVA);
+        shape[0x20 / 8] = planes.as_mut_ptr() as usize;
+        shape[0x28 / 8] = planes.len();
+        let address = shape.as_mut_ptr() as usize;
+        for (i, off) in [0xb0, 0xc0, 0xd0].into_iter().enumerate() {
+            for k in 0..4 {
+                write_f32(address + off + k * 4, (i * 4 + k + 1) as f32);
+            }
+        }
+        let original_shape = shape;
+        let original_planes = planes;
+        let mut baseline = capture_shape_baseline(address).expect("convex plane shape rejected");
+        for scale in [0.3, 0.85, 2.0, 1.0] {
+            baseline.apply(scale).unwrap();
+            for (actual, original) in planes.iter().zip(original_planes) {
+                assert_eq!(actual[..3], original[..3], "unit normal changed");
+                assert_eq!(actual[3], original[3] * scale);
+            }
+            for (off, words) in [(0xb0, 3), (0xc0, 3), (0xd0, 3)] {
+                for k in 0..words {
+                    let old = read_f32(original_shape.as_ptr() as usize + off + k * 4).unwrap();
+                    assert_eq!(read_f32(address + off + k * 4), Some(old * scale));
+                }
+                assert_eq!(
+                    read_f32(address + off + 12),
+                    read_f32(original_shape.as_ptr() as usize + off + 12)
+                );
+            }
+            assert_eq!(
+                &shape[..0xb0 / 8],
+                &original_shape[..0xb0 / 8],
+                "matrix/header changed"
+            );
+        }
+        assert_eq!(shape, original_shape);
+        assert_eq!(planes, original_planes);
+    }
+}
+
+#[test]
 fn convex_planes_grid_and_contact_distances_remain_coherent() {
     let _environment = Environment::new();
     let mut shape = [0usize; 0x120 / 8];

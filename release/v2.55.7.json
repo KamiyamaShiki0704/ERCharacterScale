@@ -1,0 +1,19 @@
+{
+  "version": "2.55.7",
+  "artifact": "ERCharacterScale.dll",
+  "platform": "windows-x86_64",
+  "configuration": "ERCharacterScale.toml",
+  "license": "MIT",
+  "features": [
+    "Configurable player and character scaling",
+    "Automatic equipment skeleton retargeting with optional cloth physics",
+    "Cross-character animation retargeting",
+    "Cloth, limb IK, weapon and attachment adaptation"
+  ],
+  "updates": [
+    "Fix ordinary equipment physics not following overall character scaling in Elden Ring 1.17.2.",
+    "Support convex-plane collision shapes so affected equipment with custom proportions can retain the requested overall scale.",
+    "Improve equipment physics fault isolation and recovery so invalid branches do not disable healthy cloth movement."
+  ],
+  "runtime_sdk": "fromsoftware-rs"
+}

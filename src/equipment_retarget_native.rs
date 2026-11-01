@@ -54,6 +54,8 @@ mod attachments;
 mod dummies;
 #[path = "equipment_retarget_hook.rs"]
 mod mid_hook;
+#[path = "equipment_retarget_particle_recovery.rs"]
+mod particle_recovery;
 #[path = "equipment_retarget_profile.rs"]
 mod profile;
 #[path = "equipment_retarget_recovery.rs"]
@@ -357,6 +359,7 @@ struct Session {
 }
 
 struct Work {
+    particles: particle_recovery::Monitor,
     grip: weapon::GripCache,
     generation: u64,
     scale: f64,
@@ -607,6 +610,7 @@ fn bind(key: Key, identity: Identity, generation: u64, scale: f64, force: bool) 
         .map(|b| mesh_names.get(b.name.as_str()).copied())
         .collect();
     let work = Work {
+        particles: particle_recovery::Monitor::default(),
         grip: weapon::GripCache::default(),
         generation,
         scale,
@@ -702,6 +706,7 @@ pub(crate) fn refresh(player: usize, scale: f32, generation: u64) {
             {
                 if let Ok(mut work) = session.work.lock() {
                     if work.scale != f64::from(scale) {
+                        work.particles.clear();
                         work.prepared = None;
                         work.solver_completed = None;
                     }
@@ -910,6 +915,14 @@ impl SolverInput {
                 && work.generation == self.generation
             {
                 work.solver_completed = Some(self.generation);
+                if work
+                    .particles
+                    .observe(&self.session, self.generation)
+                    .is_some_and(|n| n > 0)
+                {
+                    work.recovery_pending = false;
+                    work.recovery_attempts = 0;
+                }
             }
         });
     }
@@ -1233,7 +1246,7 @@ fn render_range(registers: *mut Registers, original: usize, matrix4: bool) -> us
             )?;
             let solved = work
                 .solved
-                .capture_model(
+                .capture_model_partial(
                     &read,
                     session.key.input + 0x48,
                     identity,
@@ -1246,12 +1259,16 @@ fn render_range(registers: *mut Registers, original: usize, matrix4: bool) -> us
                 // Use its current target pose until native physics reinitializes.
                 work.recovery_pending |= work.solved.invalid_transform;
             } else {
-                work.recovery_pending = false;
-                work.recovery_attempts = 0;
+                work.recovery_pending = work.solved.invalid_transform;
+                if !work.recovery_pending {
+                    work.recovery_attempts = 0;
+                }
                 // Native writeback scale convention is asymmetric; reconcile only
                 // rows explicitly written by the solver, never infer from magnitude.
                 for (i, mapped) in session.mesh_to_cloth.iter().enumerate() {
-                    if let Some(source) = mapped.filter(|&index| mask.contains(index)) {
+                    if let Some(source) =
+                        mapped.filter(|&index| mask.contains(index) && work.solved.valid[index])
+                    {
                         let mut m = work.solved.model[source];
                         m.x_axis *= work.scale;
                         m.y_axis *= work.scale;

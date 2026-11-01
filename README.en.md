@@ -4,7 +4,7 @@
 
 Configure the overall size of the Elden Ring player and other characters through TOML rules. Apply a scale while a SpEffect is active, or use a constant scale without any effect requirement.
 
-[Download v2.55.6](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.6) · [Configuration guide (Chinese)](docs/CONFIGURATION.md) · [Changelog](CHANGELOG.md)
+[Download v2.55.7](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.7) · [Configuration guide (Chinese)](docs/CONFIGURATION.md) · [Changelog](CHANGELOG.md)
 
 ## Features
 
@@ -18,15 +18,15 @@ Configure the overall size of the Elden Ring player and other characters through
 
 ## Latest changes
 
-This release is built with `fromsoftware-rs`.
-
-Improve weapon, item and body dummy alignment when matching equipment skeletons are split across multiple parts. Matching parts share one attachment correction, and remaining parts take over when one is removed.
+- Fix ordinary equipment physics not following overall character scaling in Elden Ring 1.17.2.
+- Support convex-plane collision shapes so affected equipment with custom proportions can retain the requested overall scale.
+- Improve equipment physics fault isolation and recovery so invalid branches do not disable healthy cloth movement.
 
 ## Installation
 
-For **Windows x64, offline Elden Ring WW2.7.1.0 / game1.17.1**. Other executable versions require separate validation.
+For **Windows x64, offline Elden Ring 1.17.1 / EXE 2.7.1.0 and 1.17.2 / EXE 2.7.2.0**. Other executable versions require separate validation.
 
-1. Download `ERCharacterScale-v2.55.6-windows-x64.zip` from the [Release page](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.6).
+1. Download `ERCharacterScale-v2.55.7-windows-x64.zip` from the [Release page](https://github.com/KamiyamaShiki0704/ERCharacterScale/releases/tag/v2.55.7).
 2. Place `ERCharacterScale.dll` and `ERCharacterScale.toml` in the same directory, and load the DLL with your existing DLL loader.
 3. Edit the TOML configuration as needed, then start the game. Restart the game after later configuration-file changes.
 

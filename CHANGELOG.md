@@ -1,16 +1,21 @@
 # Changelog
 
+## 2.55.7
+
+- Fix ordinary equipment physics not following overall character scaling in Elden Ring 1.17.2.
+- Support convex-plane collision shapes so affected equipment with custom proportions can retain the requested overall scale.
+- Improve equipment physics fault isolation and recovery so invalid branches do not disable healthy cloth movement.
+
 ## 2.55.6
 
 - Build with fromsoftware-rs while retaining multipart equipment attachment fixes.
 - Improve weapon, item and body dummy alignment for matching equipment skeletons split across multiple parts.
 - Apply shared attachment correction once and allow remaining matching parts to take over after removal.
-- Offline validation passed; in-game confirmation with the reported models remains pending.
 
 ## 2.55.5
 
 - Adapt lock-on camera height and distance to equipment proportions.
-- Preserve equipment proportions when physics poses become invalid and request a bounded native simulation reset. Recovery from intermittent physics failures still needs in-game confirmation.
+- Preserve equipment proportions when physics poses become invalid and request a bounded native simulation reset.
 
 ## 2.55.4
 
@@ -45,92 +50,53 @@
 
 ## 2.54.3 — equipment skeleton map coverage
 
-- Promote the game-tested 2.54.3-rc.1 DLL unchanged to this stable release. The embedded build identifier retains rc.1 to preserve the accepted binary.
-
-- Fix stretched hair on enlarged equipment models whose cloth maps exceed 512 rows. Solver source preparation previously applied a per-child limit to skeleton-wide mappings, while render correction still ran.
-- Share a 16,384-transform resource guard across skeleton pose, source mapping and render output. Process validated actual array lengths and retain index, memory, ownership and numeric checks.
-- Add regression coverage for large maps, duplicate and unmapped entries, the last mapped source, lazy-source selection, translation restoration, native writeback masks and invalid storage.
-- The user confirmed the reported BD_M_5290 hair issue is resolved after testing the 1.12-scale candidate. Configuration and movement/lock-on behavior are unchanged.
+- Fix stretched hair on enlarged equipment with large cloth skeleton maps.
+- Use consistent transform bounds for skeleton poses, source mappings and render output.
 
 ## 2.54.2 — collider velocity coverage
 
-- Fix cloth twitching after scaling c3185: the rigid collider velocity hook previously rejected groups above 64 colliders, while cloth resource preflight supported 256. Share the same 256-collider bound so supported groups receive the rotation correction.
-- Preserve ownership, unique-membership, native call-site, numeric and array-bound checks. Add coverage for 65, 112 and 256 colliders, the last entry, duplicate entries and out-of-range counts.
-- Replay actual Hook outputs through original velocity code: the stationary 0.85-scale control previously produced about 35.9 rad/s of artificial angular velocity; corrected output is zero.
-- The user confirmed the c3185 physics issue is resolved in the tested scene. Retain convex geometry support, static runtime linking and configuration behavior.
+- Fix cloth twitching on models such as c3185 by applying collider rotation correction to larger supported collider groups.
 
-## 2.54.1 — convex geometry cloth collision shapes
+## 2.54.1 — convex geometry collision shapes
 
-- Support hclConvexGeometryShape so models such as c3185 can scale without being rejected by cloth preflight. Scale plane distances, local bounds and centroid with the unit; scale inverse grid dimensions inversely. Keep normals, topology and native transforms unchanged.
-- Preserve shared-resource conflict protection, immutable original dimensions, numeric validation and budgeted writes.
-- Add collision/grid coherence and private c3185 resource replay coverage. The user confirmed c3185 scales correctly with unchanged frame rate.
-- Retain static C/C++ runtime linking and existing configuration behavior.
+- Support convex geometry cloth collision shapes, including plane distances, bounds, centroids and grid dimensions.
 
-## 2.54.0 — embedded C/C++ runtime
+## 2.54.0 — embedded runtime
 
-- Statically link the required C/C++ runtime into ERCharacterScale.dll; no separate Visual C++ Redistributable installation is required. Windows system components remain OS-provided.
-- Make the x64 MSVC target and static CRT flags part of the default Cargo configuration, keeping host proc-macros separate.
-- Add a dependency check for normal and delayed PE imports. Update source-build output paths and runtime requirements in both READMEs.
-- Retain the rc.6 scaling code and user configuration behavior. The user confirmed rc.6 works normally after correcting duplicate rule names; static runtime packaging is validated separately.
+- Embed the required C/C++ runtime in the DLL.
+- Configure static runtime linking for Windows x64 MSVC builds.
 
 ## 2.54.0-rc.6 — positive finite scales
 
-- Remove the fixed 0.5–3.0 scale restriction from configuration, body pose transitions and cloth routes. Player and model-specific non-player rules accept any positive finite f32 scale.
-- Check derived body dimensions before publishing the requested scale. Preflight cloth dimension batches using cached extrema, preserving budgeted updates and shared original baselines.
-- Preserve numeric overflow/underflow rejection and use wider intermediate math where necessary; do not clamp requested values.
-- Add small/large scale, cached-pose transition, shared-cloth and partial-write regression cases. Game visual acceptance for the new scale range is pending.
-- Simplify both language READMEs by removing the compatibility section and the scale-range and default-log feature descriptions.
+- Accept positive finite scales without a fixed configuration range.
+- Reject derived numeric overflow or underflow before applying scale changes.
 
-## 2.54.0-rc.5 — resident-memory permission query cost
+## 2.54.0-rc.5 — memory query performance
 
-- rc.4 failed in-game performance acceptance at a reported 6 FPS. Small-memory query-count tests missed the much higher per-call cost on large resident game regions.
-- Use bounded `K32QueryWorkingSetEx` page checks for metadata and small buffers. Query every covered page; preserve read/write/guard checks, fresh ownership reads and invalidation at each native-operation boundary.
-- Fall back to the original `VirtualQuery` checks for nonresident or unavailable page information and large spans. Keep full region discovery for cloth field-span grouping.
-- Add large resident-heap regression through the actual pose dispatcher, plus cross-page, read-only, guard-preservation, decommit, nonresident, nested-scope, unwind and thread-isolation checks.
-- Keep `ERCharacterScale.dll`, quiet default, model rules and cloth/scale algorithms unchanged. Player scaling/switching and cloth passed the reported in-game scene on 2026-09-12; c9520 was observed at 0.6. Other models and Boss phases retain their individual validation requirements.
+- Reduce permission-query costs for resident game memory while retaining cross-page and access checks.
 
 ## 2.54.0-rc.4 — runtime cost and quiet defaults
 
-- Name the Cargo library and delivered DLL `ERCharacterScale`; build output is `ERCharacterScale.dll`.
-- Disable log file creation, message formatting and one-shot diagnostics by default. The opt-in `diagnostics` Cargo feature retains developer evidence collection.
-- Reuse current-operation memory permissions for full consumer identity capture and subject-owned effect traversal, retaining fresh data reads and invalidation across native calls/frames.
-- Preserve the existing 60-frame binding audit cadence instead of forcing a full rebind every frame; scale changes, missing bindings and identity replacement still rebind.
-- Reuse immutable prepared cloth resource spans during restoration, preserving alias protection and departed-root checks.
-- Add deterministic OS-query, binding-cadence, restoration-scan and no-log regressions. rc.3 c9520 shrink/cloth behavior was accepted by the user; rc.4 subsequently failed game performance acceptance (reported 6 FPS).
+- Use ERCharacterScale.dll as the library name.
+- Disable runtime logging and optional diagnostics by default.
+- Reduce redundant permission checks, binding refreshes and resource scans.
 
-## 2.54.0-rc.3 — model matching and local character coverage
+## 2.54.0-rc.3 — local character coverage
 
-- Include verified role-7 EnemyIns observed on debug-spawned c9520; enumerate debug and summon collections directly and deduplicate their aliases.
-- Keep the existing `enemy` target/switch names for compatibility, but match supported local non-player characters regardless of allegiance by default. Existing model rules also apply to friendly and summoned instances.
-- Add optional per-rule `hostile_only` (default false). Only true queries native hostility; false/unknown relations skip that rule and permit later rules to match. Reject true on player rules.
-- Include verified EnemyIns roles 5/6/7 and local NPC PlayerIns roles 5/19/20/21. Preserve class, owner, pose and active-entry checks, and ghost/remote-player/Torrent exclusions.
-- Add real-input role-7 regressions, collection-to-rule coverage, model mismatch controls, optional-hostility fallback checks and no-query assertions. Keep pinned Cargo dependencies and cloth algorithms unchanged.
+- Apply model rules to supported local non-player characters, including friendly and summoned units.
+- Add optional hostile-only filtering and cover additional local character collections.
 
-## 2.54.0-rc.2 — loaded-character readiness fix
+## 2.54.0-rc.2 — loaded-character readiness
 
-- Fix the shared readiness gate rejecting loaded players and enemies: WW2.7.1.0 uses entry state 4, not the dependency's state-2 label.
-- Filter remote/ghost roles using ChrIns character type; entry byte +9 also contains 4 for ordinary local actors and cannot identify remote units.
-- Validate three original executable instruction windows before registering the scale task, including player-only configurations.
-- Distinguish a missing main-player pointer from failed player identity validation in the runtime log.
-- Add a regression for loaded player/enemy entries [4,4], retain inactive-state rejection, and correct the synthetic character fixture.
-- Preserve configuration schema, user rules, pinned dependency revision and the existing cloth/scale algorithms. In-game visual acceptance remains separate.
+- Correct loaded-player and enemy readiness checks and exclude remote or ghost roles.
 
-## 2.54.0-rc.1 — candidate, runtime acceptance pending
+## 2.54.0-rc.1 — configurable scaling
 
-- Add UTF-8 TOML configuration, ordered per-unit SpEffect rules and unconditional scaling.
-- Add model, NpcParam and event-entity filters, independent player/enemy switches, and fail-closed configuration validation.
-- Add native hostile-character selection and direct EnemyIns / CSChrModelIns cloth ownership, including non-c0000 models.
-- Retain independent character baselines and route pose, cloth and collider callbacks by verified instance ownership.
-- Coordinate shared cloth originals; keep conflicting consumers at baseline without changing unrelated characters.
-- Preserve the 2.53 rigid collider rotation correction and default player mappings.
-- Add synthetic multi-character, lifecycle, shared-cloth and native-layout checks. In-game enemy and player visual acceptance remains pending.
+- Add TOML configuration, ordered SpEffect rules, constant scaling and per-character filters.
+- Maintain separate character baselines and protect shared cloth resources from conflicting scales.
 
 ## 2.53.0
 
-- Fix sustained cloth twitching caused by scaled rotation matrices entering
-  collider quaternion-velocity calculation.
-- Preserve original translation, collision dimensions and native simulation.
-- Apply correction only to verified current local-player cloth colliders.
-- Retain complete automatic diagnostic steps; add direct before/after velocity evidence.
-- Confirm normal game behavior forBD9004 at0.5 scale.
-- Publish a standalone Cargo project with a commit-pinned fromsoftware-rs dependency.
+- Correct cloth collider rotation input during scaling to prevent sustained twitching.
+- Preserve native translation, collision dimensions and simulation.
+- Provide a standalone Cargo project using fromsoftware-rs.

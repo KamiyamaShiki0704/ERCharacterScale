@@ -17,6 +17,7 @@ const ER_HCL_CAPSULE_SHAPE_VTABLE_RVA: usize = 0x2D896D0;
 const ER_HCL_TAPERED_CAPSULE_SHAPE_VTABLE_RVA: usize = 0x2D7DBC8;
 const ER_HCL_SPHERE_SHAPE_VTABLE_RVA: usize = 0x2D89D20;
 const ER_HCL_PLANE_SHAPE_VTABLE_RVA: usize = 0x2D84968;
+const ER_HCL_CONVEX_PLANES_SHAPE_VTABLE_RVA: usize = 0x2D82F48;
 const ER_HCL_CONVEX_GEOMETRY_SHAPE_VTABLE_RVA: usize = 0x2D7D580;
 
 const MAX_PARTICLES: usize = 16_384;
@@ -1226,6 +1227,22 @@ fn capture_shape_baseline(shape: usize) -> Option<DimensionObjectBaseline> {
         ER_HCL_CONVEX_GEOMETRY_SHAPE_VTABLE_RVA => {
             capture_convex_geometry_dimensions(&mut baseline, shape)?;
         }
+        ER_HCL_CONVEX_PLANES_SHAPE_VTABLE_RVA => {
+            // Native 2.7.2 15D23E0 consumes planes at +20/count +28;
+            // +30/+70 are transform caches, +B0/+C0 local bounds, +D0 centroid.
+            // Preserve normals and matrices; only distances/positions scale.
+            let (planes, count) = baseline.capture_array(shape, 0x20, 0x28, 16, 65_535)?;
+            for i in 0..count {
+                baseline.capture_field(
+                    planes.checked_add(i * 16 + 12)?,
+                    DimensionPower::Linear,
+                    false,
+                )?;
+            }
+            for offset in [0xB0, 0xC0, 0xD0] {
+                baseline.capture_vec3(shape.checked_add(offset)?, DimensionPower::Linear)?;
+            }
+        }
         _ => return None,
     }
     Some(baseline)
@@ -1268,6 +1285,7 @@ fn is_supported_shape_vtable(vtable_rva: usize) -> bool {
             | ER_HCL_SPHERE_SHAPE_VTABLE_RVA
             | ER_HCL_PLANE_SHAPE_VTABLE_RVA
             | ER_HCL_CONVEX_GEOMETRY_SHAPE_VTABLE_RVA
+            | ER_HCL_CONVEX_PLANES_SHAPE_VTABLE_RVA
     )
 }
 
