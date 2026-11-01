@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.55.8
+
+- Correct cloth display routing for Elden Ring 1.17.2, improving the position, length and body alignment of hair and other simulated parts after overall scaling.
+
 ## 2.55.7
 
 - Fix ordinary equipment physics not following overall character scaling in Elden Ring 1.17.2.

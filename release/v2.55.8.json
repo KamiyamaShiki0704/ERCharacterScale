@@ -1,0 +1,17 @@
+{
+  "version": "2.55.8",
+  "artifact": "ERCharacterScale.dll",
+  "platform": "windows-x86_64",
+  "configuration": "ERCharacterScale.toml",
+  "license": "MIT",
+  "features": [
+    "Configurable player and character scaling",
+    "Automatic equipment skeleton retargeting with optional cloth physics",
+    "Cross-character animation retargeting",
+    "Cloth, limb IK, weapon and attachment adaptation"
+  ],
+  "updates": [
+    "Correct cloth display routing for Elden Ring 1.17.2, improving the position, length and body alignment of hair and other simulated parts after overall scaling."
+  ],
+  "runtime_sdk": "fromsoftware-rs"
+}
